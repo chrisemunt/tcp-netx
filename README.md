@@ -2,7 +2,8 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP.
 
 Chris Munt <cmunt@mgateway.com>
-2 December 2016, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+2 December 2016,
+M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
 ## Acknowledgements
 
