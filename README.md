@@ -15,6 +15,7 @@ Create a directory for the tcp-netx environment, eg *~/tcp-netx*
 Then, assuming you've already installed Node.js:
 
    cd ~/tcp-netx
+   
    npm install tcp-netx
    
 Modify the first *cd* command as appropriate for your system.
