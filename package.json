@@ -1,0 +1,39 @@
+{
+  "author": {
+    "name": "Chris Munt",
+    "email": "cmunt@mgateway.com",
+    "url": "http://www.gateway.com/"
+  },
+  "name": "tcp-netx",
+  "description": "Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP.",
+  "version": "1.0.3",
+  "maintainers": "Chris Munt <cmunt@mgateway.com>",
+  "homepage": "https://github.com/chrisemunt/tcp-netx",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chrisemunt/tcp-netx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chrisemunt/tcp-netx/issues"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "keywords": [
+    "tcp",
+    "http",
+    "network"
+  ],
+  "scripts": {
+    "install": "node-gyp rebuild | tee -a builderror.log",
+    "uninstall": "rm -rf build builderror.log src/tcp-node.o",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "main": "./lib/tcp-netx",
+  "license": "AGPL-3.0",
+  "engines": {
+    "node": ">=0.12.x"
+  }
+}
