@@ -6,7 +6,7 @@
   },
   "name": "tcp-netx",
   "description": "Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "maintainers": "Chris Munt <cmunt@mgateway.com>",
   "homepage": "https://github.com/chrisemunt/tcp-netx",
   "repository": {
