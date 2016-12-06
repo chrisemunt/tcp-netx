@@ -9,18 +9,17 @@
    |                                                                          |
    | http://www.mgateway.com                                                  |
    |                                                                          |
-   | This program is free software: you can redistribute it and/or modify     |
-   | it under the terms of the GNU Affero General Public License as           |
-   | published by the Free Software Foundation, either version 3 of the       |
-   | License, or (at your option) any later version.                          |
+   | Licensed under the Apache License, Version 2.0 (the "License"); you may  |
+   | not use this file except in compliance with the License.                 |
+   | You may obtain a copy of the License at                                  |
    |                                                                          |
-   | This program is distributed in the hope that it will be useful,          |
-   | but WITHOUT ANY WARRANTY; without even the implied warranty of           |
-   | MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            |
-   | GNU Affero General Public License for more details.                      |
+   | http://www.apache.org/licenses/LICENSE-2.0                               |
    |                                                                          |
-   | You should have received a copy of the GNU Affero General Public License |
-   | along with this program.  If not, see <http://www.gnu.org/licenses/>.    |
+   | Unless required by applicable law or agreed to in writing, software      |
+   | distributed under the License is distributed on an "AS IS" BASIS,        |
+   | WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. |
+   | See the License for the specific language governing permissions and      |
+   | limitations under the License.                                           |      
    |                                                                          |
    |                                                                          |
    | Special thanks to the Ripple Foundation <http://rippleosi.org> for       |
@@ -99,7 +98,7 @@
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       0
-#define NETX_VERSION_BUILD       3
+#define NETX_VERSION_BUILD       6
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -2867,9 +2866,20 @@ int netx_get_error_message(int error_code, char *message, int size, int context)
 #else
 
    if (context == 0) {
+#if defined(_GNU_SOURCE)
+      char *p;
+#endif
       strcpy(message, "");
 #if defined(LINUX) || defined(AIX) || defined(OSF1) || defined(MACOSX)
+#if defined(_GNU_SOURCE)
+      p = strerror_r(error_code, message, (size_t) size);
+      if (p && p != message) {
+         strncpy(message, p, size - 1);
+         message[size - 1] = '\0';
+      }
+#else
       strerror_r(error_code, message, (size_t) size);
+#endif
       size = (int) strlen(message);
 #else
       netx_get_std_error_message(error_code, message, size, context);
