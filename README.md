@@ -12,16 +12,34 @@ Special thanks to the Ripple Foundation [http://rippleosi.org](http://rippleosi.
 support and funding of this project.
 
 
+## Pre-requisites 
+
+**tcp-netx** is a Node.js addon written in C++.  It is distributed as C++ source code and the NPM installation procedure will expect a C++ compiler to be present on the target system.
+
+Linux systems can use the freely available GNU C++ compiler (g++) which can be installed as follows.
+
+Ubuntu:
+
+       apt-get install g++
+
+Red Hat and CentOS:
+
+       yum install gcc-c++
+
+Apple OS X can use the freely available **Xcode** development environment.
+
+There are two options for Windows, both of which are free:
+
+* Microsoft Visual Studio Community: [https://www.visualstudio.com/vs/community/](https://www.visualstudio.com/vs/community/)
+* MinGW: [http://www.mingw.org/](http://www.mingw.org/)
+
 ## Installing tcp-netx
 
-Create a directory for the tcp-netx environment, eg *~/tcp-netx*
+Assuming that Node.js is already installed and a C++ compiler is available to the installation process:
 
-Then, assuming you've already installed Node.js:
-
-       cd ~/tcp-netx
        npm install tcp-netx
 
-Modify that first *cd* command as appropriate for your system.
+This command will create the **tcp-netx** addon (*tcp-netx.node*).
 
 ## Documentation
 
@@ -66,7 +84,7 @@ Result Object:
           [, ErrorCode: <code>]
        }
      
-If the operation was successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
 
 #### Write to the Server
@@ -89,7 +107,7 @@ Result Object:
           [, ErrorCode: <code>]
        }
      
-If the operation was successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
 Example: *Send "PING" to the server*
 
@@ -117,7 +135,7 @@ Result Object:
           [, ErrorCode: <code>]
        }
      
-If the operation was successful, the *ok flag* will be set to *true* and the response *data* will be returned.  Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+If the operation is successful, the *ok flag* will be set to *true* and the response *data* will be returned.  Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
 If the *eof* flag is set then it must be assumed that the server closed the connection - either as a result of an error condition or timeout.
 
@@ -133,11 +151,11 @@ The request object sent to the web server must, at the very least, contain the H
 
 Synchronous:
 
-       var result = db.http({headers: <headers> [, content: <content> [, timeout: <timeout>]});
+       var result = db.http({headers: <headers> [, content: <content>] [, timeout: <timeout>]});
 
 Asynchronous:
 
-       db.http({headers: <headers> [, content: <content>  [, timeout: <timeout>]}, callback(<error>, <result>));
+       db.http({headers: <headers> [, content: <content>]  [, timeout: <timeout>]}, callback(<error>, <result>));
        
 Result Object:
 
@@ -151,7 +169,7 @@ Result Object:
           [, ErrorCode: <code>]
        }
      
-If the operation was successful, the *ok flag* will be set to *true* and the response *headers* and any *content* (i.e. payload) will be returned.  Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+If the operation is successful, the *ok flag* will be set to *true* and the response *headers* and any *content* (i.e. payload) will be returned.  Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
 If the *eof* flag is set then it must be assumed that the server closed the connection - either as a result of an error condition or timeout.
 
@@ -159,7 +177,7 @@ If the HTTP *keepalive* flag is set then it is possible to send a further HTTP r
 
 Example: *Request /index.html from the web server*
 
-       var = result = db.http({headers: "GET /index.html HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n"});
+       var result = db.http({headers: "GET /index.html HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n"});
 
 #### Disconnect from the Server
 
@@ -179,8 +197,23 @@ Result Object:
           [, ErrorCode: <code>]
        }
      
-If the operation was successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
+#### Function call trace
+
+**tcp-netx** contains a function call trace and logging facility to help with troubleshooting problems in operation.
+
+To write a running commentary of progress to the console window:
+
+       var result = db.settrace(1);
+
+To write a running commentary of progress to a file:
+
+       var result = db.settrace("/tmp/tcp-netx.log");
+
+To disable the trace facility:
+
+       var result = db.settrace(0);
 
 ## License
 
