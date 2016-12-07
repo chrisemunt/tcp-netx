@@ -98,7 +98,7 @@
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       0
-#define NETX_VERSION_BUILD       6
+#define NETX_VERSION_BUILD       7
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -1327,7 +1327,7 @@ int netx_write(NETXCON *pcon)
 
 int netx_http(NETXCON *pcon)
 {
-   int rc, size, clen, chunked, total, n, bsize, blen, bptr, avail, chunk_size, eof;
+   int rc, size, clen, chunked, total, n, bsize, blen, bptr, bptrcz, avail, chunk_size, eof;
    char headers[2048], buffer[NETX_RECV_BUFFER];
    unsigned char *p, *p1;
 
@@ -1442,12 +1442,13 @@ int netx_http(NETXCON *pcon)
             goto netx_http_exit;
          }
       }
-      if (total < pcon->recv_buf_len) {
+      if (total > pcon->recv_buf_len) {
          rc = netx_tcp_read(pcon, (unsigned char *) (pcon->recv_buf + pcon->recv_buf_len), (int) (total - pcon->recv_buf_len), pcon->timeout, 1);
          if (rc < 1) {
             eof = 1;
             goto netx_http_exit;
          }
+         pcon->recv_buf_len += rc;
       }
    }
 
@@ -1460,38 +1461,54 @@ int netx_http(NETXCON *pcon)
 
       pcon->recv_buf_len = pcon->hlen; /* reset to end of header */
 
-      for (n = 0; n < 32000; n ++) {
-         for (;;) {
-            while (buffer[bptr] == '\r' || buffer[bptr] == '\n')
-               bptr ++;
-            p = (unsigned char *) strstr(buffer + bptr, "\r\n");
-            if (p) {
-               break;
+      for (;;) {
+         if (bptr >= blen) {
+            bptr = 0;
+            blen = 0;
+         }
+         else if (bptr > (bsize - 32)) {
+            n = 0;
+            avail = (blen - bptr);
+            while (bptr < blen) {
+               buffer[n ++] = buffer[bptr ++];
             }
-            rc = netx_tcp_read(pcon, (unsigned char *) buffer + bptr, (int) bsize - bptr, pcon->timeout, 0);
+            bptr = 0;
+            blen = avail;
+         }
+         bptrcz = 0;
+         for (;;) {
+            if (bptr < blen) {
+               while (buffer[bptr] == '\r' || buffer[bptr] == '\n')
+                  bptr ++;
+               for (n = bptr; n < blen; n ++) {
+                  if (n > 1 &&  buffer[n - 1] == '\r' && buffer[n] == '\n') {
+                     bptrcz = (n - 1);
+                     break;
+                  }
+               }
+               if (bptrcz) {
+                  break;
+               }
+            }
+            rc = netx_tcp_read(pcon, (unsigned char *) buffer + blen, (int) bsize - blen, pcon->timeout, 0);
             if (rc < 1) {
                eof = 1;
                break;
             }
-
-            bptr += rc;
+            blen += rc;
          }
 
-         if (eof) {
+         if (eof && blen == 0) {
             break;
          }
 
-         if (p) {
-            *p = '\0';
+         if (bptrcz) {
+            buffer[bptrcz] = '\0';
             chunk_size = (int) strtol((char *) (buffer + bptr), NULL, 16);
-/*
-            printf("\r\n bptr=%d; blen=%d; chunk size %d chead=%s; (%d)", bptr, blen, chunk_size, buffer + bptr, (int) strlen(buffer + bptr));
-*/
             if (chunk_size == 0) {
                break;
             }
-            bptr = (int) strlen(buffer + bptr) + 2;
-
+            bptr = bptrcz + 2;
             total = pcon->recv_buf_len + chunk_size;
             if (total >= pcon->recv_buf_size) {
                if (netx_resize(pcon, &(pcon->recv_buf), &(pcon->recv_buf_size), pcon->recv_buf_len, total + 32) < 0) {
@@ -1500,10 +1517,8 @@ int netx_http(NETXCON *pcon)
                   break;
                }
             }
-
             for (;;) {
                avail = (blen - bptr);
-
                if (avail < chunk_size) {
                   memcpy((void *) (pcon->recv_buf + pcon->recv_buf_len), (void *) (buffer + bptr), avail);
                   pcon->recv_buf_len += avail;
@@ -1514,7 +1529,6 @@ int netx_http(NETXCON *pcon)
                   memcpy((void *) (pcon->recv_buf + pcon->recv_buf_len), (void *) (buffer + bptr), chunk_size);
                   pcon->recv_buf_len += chunk_size;
                   bptr += chunk_size;
-                  bptr += 2; /* advance past post-chunk crlf */
                   chunk_size = 0;
                   break;
                }
@@ -1545,11 +1559,12 @@ int netx_http(NETXCON *pcon)
                break;
             }
          }
-         rc = netx_tcp_read(pcon, (unsigned char *) (pcon->recv_buf + pcon->recv_buf_len), (int) total, pcon->timeout, 1);
+         rc = netx_tcp_read(pcon, (unsigned char *) (pcon->recv_buf + pcon->recv_buf_len), (int) total, pcon->timeout, 0);
          if (rc < 1) {
             eof = 1;
             break;
          }
+         pcon->recv_buf_len += rc;
       }
    }
 
@@ -1772,24 +1787,20 @@ int netx_load_winsock(NETXCON *pcon, int context)
 
    netx_so.plibrary = netx_dso_load(netx_so.libnam);
 
-#if defined(NETX_DEBUG)
-   if (pcon->p_debug->debug == 1) {
-      fprintf(pcon->p_debug->p_fdebug, "\r\n       >>> %p==netx_dso_load(%s)", netx_so.plibrary, netx_so.libnam);
-      fflush(pcon->p_debug->p_fdebug);
+   if (pcon->trace == 1) {
+      fprintf(pcon->pftrace, "\r\n       >>> %p==netx_dso_load(%s)", netx_so.plibrary, netx_so.libnam);
+      fflush(pcon->pftrace);
    }
-#endif
 
    if (!netx_so.plibrary) {
       netx_so.winsock = 1;
       strcpy(netx_so.libnam, "WSOCK32.DLL");
       netx_so.plibrary = netx_dso_load(netx_so.libnam);
 
-#if defined(NETX_DEBUG)
-      if (pcon->p_debug->debug == 1) {
-         fprintf(pcon->p_debug->p_fdebug, "\r\n       >>> %p==netx_dso_load(%s)", netx_so.plibrary, netx_so.libnam);
-         fflush(pcon->p_debug->p_fdebug);
+      if (pcon->trace == 1) {
+         fprintf(pcon->pftrace, "\r\n       >>> %p==netx_dso_load(%s)", netx_so.plibrary, netx_so.libnam);
+         fflush(pcon->pftrace);
       }
-#endif
 
       if (!netx_so.plibrary) {
          goto netx_load_winsock_no_so;
@@ -2740,8 +2751,10 @@ int netx_tcp_read(NETXCON *pcon, unsigned char *data, int size, int timeout, int
       }
 
       len += n;
-      if (context && len == size) {
-         break;
+      if (context) { /* Must read length requested cmtxxx */
+         if (len == size) {
+            break;
+         }
       }
       else {
          break;
