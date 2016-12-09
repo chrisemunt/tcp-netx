@@ -33,6 +33,14 @@ There are two options for Windows, both of which are free:
 * Microsoft Visual Studio Community: [https://www.visualstudio.com/vs/community/](https://www.visualstudio.com/vs/community/)
 * MinGW: [http://www.mingw.org/](http://www.mingw.org/)
 
+If the Windows machine is not set up for systems development, building native Addon modules for this platform from C++ source can be quite arduous.  There is some helpful advice available at:
+
+* [Compiling native Addon modules for Windows](https://github.com/Microsoft/nodejs-guidelines/blob/master/windows-environment.md#compiling-native-addon-modules)
+
+Alternatively there are built Windows x64 binaries available from:
+
+* [https://github.com/chrisemunt/tcp-netx/blob/master/bin/winx64](https://github.com/chrisemunt/tcp-netx/blob/master/bin/winx64)
+
 ## Installing tcp-netx
 
 Assuming that Node.js is already installed and a C++ compiler is available to the installation process:
