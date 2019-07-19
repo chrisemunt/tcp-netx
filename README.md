@@ -3,8 +3,10 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP.
 
 Chris Munt <cmunt@mgateway.com>  
-2 December 2016, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+19 July 2019, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
+* Verified to work with Node.js v4 to v12.
+* [Release Notes](#RelNotes) can be found at the end of this document.
 
 ## Acknowledgements
 
@@ -97,6 +99,8 @@ If the operation is successful, the *ok flag* will be set to *true*. Otherwise, 
 
 #### Write to the Server
 
+The default character encoding for the **write()** method is UTF8.  To write binary data to the server use the **writebinary()** method instead.
+
 The request object sent to the server must contain the *data* field.
 
 Synchronous:
@@ -123,7 +127,9 @@ Example: *Send "PING" to the server*
        
 #### Read from the Server
 
-Optionally, the read method may be supplied with an object to specify the *length* of the data to be read and a *timeout* may also be specified (in seconds).
+The default character encoding for the **read()** method is UTF8.  To read binary data from the server use the **readbinary()** method instead.
+
+Optionally, the **read()** method may be supplied with an object to specify the *length* of the data to be read and a *timeout* may also be specified (in seconds).
 
 Synchronous:
 
@@ -239,3 +245,14 @@ Licensed under the Apache License, Version 2.0 (the "License"); you may not use 
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.      
 
+
+## <a name="#RelNotes"></a>Release Notes
+
+### v1.0.7 (2 December 2016)
+
+* Initial Release
+
+### v1.1.8 (19 July 2019)
+
+* Support for Node.js v8, v10 and v12.
+* Support for sending and receiving binary data: **readbinary()** and **writebinary()** methods.
