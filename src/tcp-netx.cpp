@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2017 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2016-2019 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -97,8 +97,8 @@
 #include <node_object_wrap.h>
 
 #define NETX_VERSION_MAJOR       1
-#define NETX_VERSION_MINOR       0
-#define NETX_VERSION_BUILD       7
+#define NETX_VERSION_MINOR       1
+#define NETX_VERSION_BUILD       8
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -398,6 +398,30 @@ typedef struct tagNETXCON {
 } NETXCON, *pcon;
 
 
+#if NETX_NODE_VERSION >= 120000
+#define NETX_TO_OBJECT(a)            a->ToObject(isolate)
+#define NETX_TO_STRING(a)            a->ToString(isolate)
+#define NETX_NUMBER_VALUE(a)         a->NumberValue(icontext).ToChecked()
+#define NETX_INT32_VALUE(a)          a->Int32Value(icontext).FromJust()
+#else
+#define NETX_TO_OBJECT(a)            a->ToObject()
+#define NETX_TO_STRING(a)            a->ToString()
+#define NETX_NUMBER_VALUE(a)         a->NumberValue()
+#if NETX_NODE_VERSION >= 70000
+#define NETX_INT32_VALUE(a)          a->Int32Value()
+#else
+#define NETX_INT32_VALUE(a)          a->ToInt32()->Value();
+#endif
+#endif
+
+/*
+#if NETX_NODE_VERSION >= 70000
+            s->pcon->length = request->Get(length_name)->Int32Value();
+#else
+            s->pcon->length = request->Get(length_name)->ToInt32()->Value();
+#endif
+*/
+
 static NETXSOCK       netx_so        = {0, 0, 0, 0, 0, 0, 0, {'\0'}};
 
 
@@ -438,6 +462,7 @@ class server : public node::ObjectWrap
 private:
 
    int         s_count;
+   short       binary;
 
 public:
 
@@ -451,24 +476,40 @@ public:
    static Persistent<Function> s_ct;
 
 
+#if NETX_NODE_VERSION >= 100000
+   static void Init(Local<Object> target)
+#else
    static void Init(Handle<Object> target)
+#endif
    {
       Isolate* isolate = Isolate::GetCurrent();
       Local<FunctionTemplate> t = FunctionTemplate::New(isolate, New);
-      t->SetClassName(String::NewFromUtf8(isolate, "server"));
+      t->SetClassName(netx_new_string8(isolate, (char *) "server", 1));
       t->InstanceTemplate()->SetInternalFieldCount(1);
 
       NODE_SET_PROTOTYPE_METHOD(t, "version", version);
       NODE_SET_PROTOTYPE_METHOD(t, "settrace", settrace);
       NODE_SET_PROTOTYPE_METHOD(t, "connect", connect);
       NODE_SET_PROTOTYPE_METHOD(t, "read", read);
+      NODE_SET_PROTOTYPE_METHOD(t, "readbin", readbinary);
+      NODE_SET_PROTOTYPE_METHOD(t, "readbinary", readbinary);
       NODE_SET_PROTOTYPE_METHOD(t, "write", write);
+      NODE_SET_PROTOTYPE_METHOD(t, "writebin", writebinary);
+      NODE_SET_PROTOTYPE_METHOD(t, "writebinary", writebinary);
       NODE_SET_PROTOTYPE_METHOD(t, "http", http);
       NODE_SET_PROTOTYPE_METHOD(t, "disconnect", disconnect);
 
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+      s_ct.Reset(isolate, t->GetFunction(icontext).ToLocalChecked());
+      target->Set(icontext, netx_new_string8(isolate, (char *) "server", 1), t->GetFunction(icontext).ToLocalChecked()).FromJust();
+#else
       s_ct.Reset(isolate, t->GetFunction());
+      target->Set(netx_new_string8(isolate, (char *) "server", 1), t->GetFunction());
+#endif
 
-      target->Set(String::NewFromUtf8(isolate, "server"), t->GetFunction());
+
+
       return;
    }
 
@@ -488,6 +529,9 @@ public:
    {
       int narg;
       Isolate* isolate = Isolate::GetCurrent();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
 
       server *s = new server();
@@ -495,18 +539,12 @@ public:
 
       narg = args.Length();
       if (narg < 2) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
       }
 
-      Local<String> ip = args[0]->ToString();
-      ip->WriteUtf8(s->ip_address);
-
-#if NETX_NODE_VERSION >= 70000
-      s->port = (int) args[1]->Int32Value();
-#else
-      s->port = (int) args[1]->ToInt32()->Value();
-#endif
-
+      Local<String> ip = NETX_TO_STRING(args[0]);
+      netx_write_char8(isolate, ip, s->ip_address, 1);
+      s->port = (int) NETX_INT32_VALUE(args[1]);
       s->pcon = NULL;
       s->pftrace = NULL;
       s->trace = 0;
@@ -553,6 +591,84 @@ public:
    }
 
 
+   static int netx_string8_length(Isolate * isolate, Local<String> str, int utf8)
+   {
+      if (utf8) {
+#if NETX_NODE_VERSION >= 120000
+         return str->Utf8Length(isolate);
+#else
+         return str->Utf8Length();
+#endif
+      }
+      else {
+         return str->Length();
+      }
+   }
+
+
+   static Local<String> netx_new_string8(Isolate * isolate, char * buffer, int utf8)
+   {
+      if (utf8) {
+#if NETX_NODE_VERSION >= 1200
+         return String::NewFromUtf8(isolate, buffer);
+#else
+         return String::NewFromUtf8(buffer);
+#endif
+      }
+      else {
+#if NETX_NODE_VERSION >= 100000
+         return String::NewFromOneByte(isolate, (uint8_t *) buffer, NewStringType::kInternalized).ToLocalChecked();
+#elif NETX_NODE_VERSION >= 1200
+         return String::NewFromOneByte(isolate, (uint8_t *) buffer);
+#else
+         return String::New(buffer);
+#endif
+      }
+   }
+
+
+   static Local<String> netx_new_string8n(Isolate * isolate, char * buffer, unsigned long len, int utf8)
+   {
+      if (utf8) {
+#if NETX_NODE_VERSION >= 1200
+         return String::NewFromUtf8(isolate, buffer, String::kNormalString, len);
+#else
+         return String::NewFromUtf8(buffer, len);
+#endif
+      }
+      else {
+#if NETX_NODE_VERSION >= 100000
+         return String::NewFromOneByte(isolate, (uint8_t *) buffer, NewStringType::kInternalized, len).ToLocalChecked();
+#elif NETX_NODE_VERSION >= 1200
+         return String::NewFromOneByte(isolate, (uint8_t *) buffer, String::kNormalString, len);
+#else
+         return String::New(buffer);
+#endif
+      }
+   }
+
+
+   static int netx_write_char8(v8::Isolate * isolate, Local<String> str, char * buffer, int utf8)
+   {
+      if (utf8) {
+#if NETX_NODE_VERSION >= 120000
+         return str->WriteUtf8(isolate, buffer);
+#else
+         return str->WriteUtf8(buffer);
+#endif
+      }
+      else {
+#if NETX_NODE_VERSION >= 120000
+         return str->WriteOneByte(isolate, (uint8_t *) buffer);
+#elif NETX_NODE_VERSION >= 1200
+         return str->WriteOneByte((uint8_t *) buffer);
+#else
+         return str->WriteAscii((char *) buffer);
+#endif
+      }
+   }
+
+
    static void netx_invoke_callback(uv_work_t *req, int status)
    {
       Isolate* isolate = Isolate::GetCurrent();
@@ -577,7 +693,13 @@ public:
 #endif
 
       Local<Function> cb = Local<Function>::New(isolate, baton->cb);
+
+#if NETX_NODE_VERSION >= 120000
+      /* cb->Call(isolate->GetCurrentContext(), isolate->GetCurrentContext()->Global(), 2, argv); */
+      cb->Call(isolate->GetCurrentContext(), Null(isolate), 2, argv).ToLocalChecked();
+#else
       cb->Call(isolate->GetCurrentContext()->Global(), 2, argv);
+#endif
 
 #if NETX_NODE_VERSION >= 40000
       if (try_catch.HasCaught()) {
@@ -608,63 +730,63 @@ public:
       Local<Object> result = Object::New(isolate);
 
       if (s->pcon->error[0]) {
-         key = String::NewFromUtf8(isolate, NETX_STR_OK);
+         key = netx_new_string8(isolate, (char *) NETX_STR_OK, 1);
          result->Set(key, Integer::New(isolate, false));
 
-         error = String::NewFromUtf8(isolate, s->pcon->error);
-         key = String::NewFromUtf8(isolate, NETX_STR_ERRORMESSAGE);
+         error = netx_new_string8(isolate, s->pcon->error, 1);
+         key = netx_new_string8(isolate, (char *) NETX_STR_ERRORMESSAGE, 1);
          result->Set(key, error);
 
-         key = String::NewFromUtf8(isolate, NETX_STR_ERRORCODE);
+         key = netx_new_string8(isolate, (char *) NETX_STR_ERRORCODE, 1);
          result->Set(key, Integer::New(isolate, s->pcon->error_no));
 
          if (s->pcon->method == NETX_METHOD_HTTP || s->pcon->method == NETX_METHOD_READ) {
             s->pcon->eof = 1;
-            key = String::NewFromUtf8(isolate, NETX_STR_EOF);
+            key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
             result->Set(key, Integer::New(isolate, s->pcon->eof));
          }
          if (s->pcon->method == NETX_METHOD_HTTP) {
-            key = String::NewFromUtf8(isolate, NETX_STR_CONTENT);
-            result->Set(key, String::NewFromUtf8(isolate, ""));
+            key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
+            result->Set(key, netx_new_string8(isolate, (char *) "", 1));
          }
          else if (s->pcon->method == NETX_METHOD_READ) {
-            key = String::NewFromUtf8(isolate, NETX_STR_DATA);
-            result->Set(key, String::NewFromUtf8(isolate, ""));
+            key = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
+            result->Set(key, netx_new_string8(isolate, (char *) "", 1));
          }
 
 
       }
       else {
-         key = String::NewFromUtf8(isolate, NETX_STR_OK);
+         key = netx_new_string8(isolate, (char *) NETX_STR_OK, 1);
          result->Set(key, Integer::New(isolate, true));
 
          if (s->pcon->info[0]) {
-            key = String::NewFromUtf8(isolate, NETX_STR_INFORMATION);
-            result->Set(key, String::NewFromUtf8(isolate, (char *) s->pcon->info));
+            key = netx_new_string8(isolate, (char *) NETX_STR_INFORMATION, 1);
+            result->Set(key, netx_new_string8(isolate, (char *) s->pcon->info, 1));
          }
 
          if (s->pcon->method == NETX_METHOD_HTTP) {
-            key = String::NewFromUtf8(isolate, NETX_STR_KEEPALIVE);
+            key = netx_new_string8(isolate, (char *) NETX_STR_KEEPALIVE, 1);
             result->Set(key, Integer::New(isolate, s->pcon->keepalive));
 
-            key = String::NewFromUtf8(isolate, NETX_STR_EOF);
+            key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
             result->Set(key, Integer::New(isolate, s->pcon->eof));
             if (s->pcon->hlen) {
-               key = String::NewFromUtf8(isolate, NETX_STR_HEADERS);
-               result->Set(key, String::NewFromUtf8(isolate, (char *) s->pcon->recv_buf, String::kNormalString, s->pcon->hlen));
-               key = String::NewFromUtf8(isolate, NETX_STR_CONTENT);
-               result->Set(key, String::NewFromUtf8(isolate, (char *) (s->pcon->recv_buf + s->pcon->hlen), String::kNormalString, s->pcon->recv_buf_len- s->pcon->hlen));
+               key = netx_new_string8(isolate, (char *) NETX_STR_HEADERS, 1);
+               result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->hlen, 1));
+               key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
+               result->Set(key, netx_new_string8n(isolate, (char *) (s->pcon->recv_buf + s->pcon->hlen), s->pcon->recv_buf_len- s->pcon->hlen, 1));
             }
             else {
-               key = String::NewFromUtf8(isolate, NETX_STR_CONTENT);
-               result->Set(key, String::NewFromUtf8(isolate, (char *) s->pcon->recv_buf, String::kNormalString, s->pcon->recv_buf_len));
+               key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
+               result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, 1));
             }
          }
          else if (s->pcon->method == NETX_METHOD_READ) {
-            key = String::NewFromUtf8(isolate, NETX_STR_EOF);
+            key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
             result->Set(key, Integer::New(isolate, s->pcon->eof));
-            key = String::NewFromUtf8(isolate, NETX_STR_DATA);
-            result->Set(key, String::NewFromUtf8(isolate, (char *) s->pcon->recv_buf, String::kNormalString, s->pcon->recv_buf_len));
+            key = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
+            result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, s->binary ? 0 : 1));
          }
       }
 
@@ -684,11 +806,11 @@ public:
 
       narg = args.Length();
       if (narg > 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "The version method does not take any arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "The version method does not take any arguments", 1)));
       }
 
       sprintf(buffer, "%d.%d.%d", NETX_VERSION_MAJOR, NETX_VERSION_MINOR, NETX_VERSION_BUILD);
-      Local<String> result = String::NewFromUtf8(isolate, buffer);
+      Local<String> result = netx_new_string8(isolate, buffer, 1);
       args.GetReturnValue().Set(result);
 
       return;
@@ -707,10 +829,10 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       narg = args.Length();
       if (narg < 1) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "The settrace method takes one argument")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "The settrace method takes one argument", 1)));
       }
 
-      args[0]->ToString()->WriteUtf8(buffer);
+      netx_write_char8(isolate, NETX_TO_STRING(args[0]), buffer, 1);
 
       result = 0;
       if (buffer[0] == '0') {
@@ -732,14 +854,14 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
             s->trace = 1;
             s->pftrace = fopen(buffer, "a");
             if (s->pftrace) {
-               fprintf(s->pftrace, "\r\n-> %p<=fopen(%s, \"a\") (Trace file opened)", s->pftrace, buffer);
+               fprintf(s->pftrace, "\r\n-> fopen(%s, \"a\") (Trace file opened)", buffer);
                fflush(s->pftrace);
                strcpy(s->trace_dev, buffer);
             }
             else {
                result = -1;
                s->pftrace = stdout;
-               fprintf(s->pftrace, "\r\n-> %p<=fopen(%s, \"a\") (Cannot open trace file specified - using stdout instead)", s->pftrace, buffer);
+               fprintf(s->pftrace, "\r\n-> fopen(%s, \"a\") (Cannot open trace file specified - using stdout instead)", buffer);
                fflush(s->pftrace);
             }
          }
@@ -770,7 +892,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          s->pcon = (NETXCON *) netx_malloc(sizeof(NETXCON), 0);
 
          if (!s->pcon) {
-            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to allocate connection memory block")));
+            isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate connection memory block", 1)));
          }
          memset((void *) s->pcon, 0, sizeof(NETXCON));
 
@@ -779,13 +901,13 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          s->pcon->send_buf = (unsigned char *) netx_malloc(sizeof(char) * NETX_RECV_BUFFER, 0);
          if (!s->pcon->send_buf) {
-            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to allocate memory for send buffer")));
+            isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
          }
          s->pcon->send_buf[0] = '\0';
          s->pcon->send_buf_size = NETX_RECV_BUFFER - 1;
          s->pcon->recv_buf = (unsigned char *) netx_malloc(sizeof(char) * NETX_RECV_BUFFER, 0);
          if (!s->pcon->recv_buf) {
-            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to allocate memory for recv buffer")));
+            isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for recv buffer", 1)));
          }
          s->pcon->recv_buf[0] = '\0';
          s->pcon->recv_buf_size = NETX_RECV_BUFFER - 1;
@@ -796,7 +918,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       narg = args.Length();
       if (narg < 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *)"Unable to process arguments", 1)));
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -845,22 +967,41 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
    static void read(const FunctionCallbackInfo<Value>& args)
    {
+      read_ex(args, 0);
+      return;
+   }
+
+
+   static void readbinary(const FunctionCallbackInfo<Value>& args)
+   {
+      read_ex(args, 1);
+      return;
+   }
+
+
+   static void read_ex(const FunctionCallbackInfo<Value>& args, short binary)
+   {
       Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
       short async;
       int narg;
 
       server * s = ObjectWrap::Unwrap<server>(args.This());
       s->s_count ++;
+      s->binary = binary;
+
       if (!s->pcon) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "No connection to server established")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
       }
 
       s->pcon->method = NETX_METHOD_READ;
 
       narg = args.Length();
       if (narg < 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -872,27 +1013,20 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       Local<Object> request;
 
-      Local<String> length_name = String::NewFromUtf8(isolate, NETX_STR_LENGTH);
-      Local<String> timeout_name = String::NewFromUtf8(isolate, NETX_STR_TIMEOUT);
+      Local<String> length_name = netx_new_string8(isolate, (char *) NETX_STR_LENGTH, 1);
+      Local<String> timeout_name = netx_new_string8(isolate, (char *) NETX_STR_TIMEOUT, 1);
 
       netx_init_vars(s->pcon);
 
       if (narg && args[0]->IsObject()) {
-         request = args[0]->ToObject();
+         request = NETX_TO_OBJECT(args[0]);
 
          if (!request->Get(length_name)->IsUndefined()) {
-#if NETX_NODE_VERSION >= 70000
-            s->pcon->length = request->Get(length_name)->Int32Value();
-#else
-            s->pcon->length = request->Get(length_name)->ToInt32()->Value();
-#endif
+            s->pcon->length = NETX_INT32_VALUE(request->Get(length_name));
+
          }
          if (!request->Get(timeout_name)->IsUndefined()) {
-#if NETX_NODE_VERSION >= 70000
-            s->pcon->length = request->Get(timeout_name)->Int32Value();
-#else
-            s->pcon->timeout = request->Get(timeout_name)->ToInt32()->Value();
-#endif
+            s->pcon->length = NETX_INT32_VALUE(request->Get(timeout_name));
          }
       }
 
@@ -932,6 +1066,19 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
    static void write(const FunctionCallbackInfo<Value>& args)
    {
+      write_ex(args, 0);
+      return;
+   }
+
+
+   static void writebinary(const FunctionCallbackInfo<Value>& args)
+   {
+      write_ex(args, 1);
+      return;
+   }
+
+
+   static void write_ex(const FunctionCallbackInfo<Value>& args, short binary)   {
       Isolate* isolate = args.GetIsolate();
       HandleScope scope(isolate);
       short async;
@@ -939,15 +1086,16 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       server * s = ObjectWrap::Unwrap<server>(args.This());
       s->s_count ++;
+      s->binary = binary;
       if (!s->pcon) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "No connection to server established")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
       }
 
       s->pcon->method = NETX_METHOD_WRITE;
 
       narg = args.Length();
       if (narg < 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -959,31 +1107,30 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       Local<Object> request;
 
-      Local<String> content_name = String::NewFromUtf8(isolate, NETX_STR_DATA);
+      Local<String> content_name = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
       Local<String> content_value;
 
       netx_init_vars(s->pcon);
 
       if (args[0]->IsObject()) {
-         request = args[0]->ToObject();
+         request = NETX_TO_OBJECT(args[0]);
 
          if (!request->Get(content_name)->IsUndefined()) {
-            content_value = request->Get(content_name)->ToString();
+            content_value = NETX_TO_STRING(request->Get(content_name));
             s->pcon->send_buf_len = content_value->Length();
             if (s->pcon->send_buf_len >= s->pcon->send_buf_size) {
                if (netx_resize(s->pcon, &(s->pcon->send_buf), &(s->pcon->send_buf_size), 0, s->pcon->send_buf_len + 32) < 0) {
-                  isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to allocate memory for send buffer")));
+                  isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
                }
             }
-            content_value->WriteUtf8((char *) s->pcon->send_buf);
-            
+            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf, s->binary ? 0 : 1);
          }
          else {
-            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Missing 'data' property")));
+            isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'data' property", 1)));
          }
       }
       else {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Missing data object")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing data object", 1)));
       }
 
       if (async) {
@@ -1023,6 +1170,9 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
    static void http(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
 
       short async;
@@ -1031,17 +1181,17 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       server * s = ObjectWrap::Unwrap<server>(args.This());
       s->s_count ++;
       if (!s->pcon) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "No connection to server established")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
       }
       if (s->pcon->connected == 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Disconnected from server")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Disconnected from server", 1)));
       }
 
       s->pcon->method = NETX_METHOD_HTTP;
 
       narg = args.Length();
       if (narg < 1) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
       }
       if (narg > 1 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1053,14 +1203,14 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       Local<Object> request;
 
-      Local<String> headers_name = String::NewFromUtf8(isolate, NETX_STR_HEADERS);
+      Local<String> headers_name = netx_new_string8(isolate, (char *) NETX_STR_HEADERS, 1);
       Local<String> headers_value;
 
-      Local<String> content_name = String::NewFromUtf8(isolate, NETX_STR_CONTENT);
+      Local<String> content_name = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
       Local<String> content_value;
 
-      Local<String> length_name = String::NewFromUtf8(isolate, NETX_STR_LENGTH);
-      Local<String> timeout_name = String::NewFromUtf8(isolate, NETX_STR_TIMEOUT);
+      Local<String> length_name = netx_new_string8(isolate, (char *) NETX_STR_LENGTH, 1);
+      Local<String> timeout_name = netx_new_string8(isolate, (char *) NETX_STR_TIMEOUT, 1);
 
       netx_init_vars(s->pcon);
 
@@ -1069,48 +1219,40 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          hlen = 0;
          clen = 0;
-         request = args[0]->ToObject();
+         request = NETX_TO_OBJECT(args[0]);
          if (!request->Get(headers_name)->IsUndefined()) {
-            headers_value = request->Get(headers_name)->ToString();
+            headers_value = NETX_TO_STRING(request->Get(headers_name));
             hlen = headers_value->Length();
          }
          else {
-            isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Missing 'headers' property")));
+            isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'headers' property", 1)));
          }
 
          if (!request->Get(content_name)->IsUndefined()) {
-            content_value = request->Get(content_name)->ToString();
+            content_value = NETX_TO_STRING(request->Get(content_name));
             clen = content_value->Length();
          }
 
          if ((hlen + clen) >= s->pcon->send_buf_size) {
             if (netx_resize(s->pcon, &(s->pcon->send_buf), &(s->pcon->send_buf_size), 0, hlen + clen + 32) < 0) {
-               isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to allocate memory for send buffer")));
+               isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
             }
          }
-         headers_value->WriteUtf8((char *) s->pcon->send_buf);
+         netx_write_char8(isolate, headers_value, (char *) s->pcon->send_buf, 1);
          if (clen) {
-            content_value->WriteUtf8((char *) s->pcon->send_buf + s->pcon->send_buf_len);
+            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf + s->pcon->send_buf_len, 1);
          }
          s->pcon->send_buf_len = hlen + clen;
 
          if (!request->Get(length_name)->IsUndefined()) {
-#if NETX_NODE_VERSION >= 70000
-            s->pcon->length = request->Get(length_name)->Int32Value();
-#else
-            s->pcon->length = request->Get(length_name)->ToInt32()->Value();
-#endif
+            s->pcon->length = NETX_INT32_VALUE(request->Get(length_name));
          }
          if (!request->Get(timeout_name)->IsUndefined()) {
-#if NETX_NODE_VERSION >= 70000
-            s->pcon->length = request->Get(timeout_name)->Int32Value();
-#else
-            s->pcon->timeout = request->Get(timeout_name)->ToInt32()->Value();
-#endif
+            s->pcon->length = NETX_INT32_VALUE(request->Get(timeout_name));
          }
       }
       else {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Missing request object")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing request object", 1)));
       }
 
       if (async) {
@@ -1158,14 +1300,14 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       server * s = ObjectWrap::Unwrap<server>(args.This());
       s->s_count ++;
       if (!s->pcon) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "No connection to server established")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
       }
 
       s->pcon->method = NETX_METHOD_DISCONNECT;
 
       narg = args.Length();
       if (narg < 0) {
-         isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Unable to process arguments")));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1216,9 +1358,17 @@ Persistent<Function> server::s_ct;
 
 extern "C" {
 #if defined(_WIN32)
-   void __declspec(dllexport) init (Handle<Object> target)
+#if NETX_NODE_VERSION >= 100000
+void __declspec(dllexport) init (Local<Object> target)
 #else
-   static void init (Handle<Object> target)
+void __declspec(dllexport) init (Handle<Object> target)
+#endif
+#else
+#if NETX_NODE_VERSION >= 100000
+static void init (Local<Object> target)
+#else
+static void init (Handle<Object> target)
+#endif
 #endif
    {
        server::Init(target);
@@ -1764,13 +1914,12 @@ int netx_load_winsock(NETXCON *pcon, int context)
 {
 #if defined(_WIN32)
    int result, mem_locked;
-   WORD VersionRequested;
    char buffer[1024];
 
    result = 0;
    mem_locked = 0;
    *buffer = '\0';
-   VersionRequested = 0;
+   netx_so.version_requested = 0;
 
    if (netx_so.load_attempted)
       return result;
@@ -1963,23 +2112,23 @@ netx_load_winsock_no_so:
    if (result == 0) {
 
       if (netx_so.winsock == 2)
-         VersionRequested = MAKEWORD(2, 2);
+         netx_so.version_requested = MAKEWORD(2, 2);
       else
-         VersionRequested = MAKEWORD(1, 1);
+         netx_so.version_requested = MAKEWORD(1, 1);
 
-      netx_so.wsastartup = NETX_WSASTARTUP(VersionRequested, &(netx_so.wsadata));
+      netx_so.wsastartup = NETX_WSASTARTUP(netx_so.version_requested, &(netx_so.wsadata));
       if (pcon->trace == 1) {
-         fprintf(pcon->pftrace, "\r\n      -> %d<=WSAStartup(%d, %p)", netx_so.wsastartup, VersionRequested, &(netx_so.wsadata));
+         fprintf(pcon->pftrace, "\r\n      -> %d<=WSAStartup(%d, %p)", netx_so.wsastartup, netx_so.version_requested, &(netx_so.wsadata));
          fflush(pcon->pftrace);
       }
 
       if (netx_so.wsastartup != 0 && netx_so.winsock == 2) {
-         VersionRequested = MAKEWORD(2, 0);
-         netx_so.wsastartup = NETX_WSASTARTUP(VersionRequested, &(netx_so.wsadata));
+         netx_so.version_requested = MAKEWORD(2, 0);
+         netx_so.wsastartup = NETX_WSASTARTUP(netx_so.version_requested, &(netx_so.wsadata));
          if (netx_so.wsastartup != 0) {
             netx_so.winsock = 1;
-            VersionRequested = MAKEWORD(1, 1);
-            netx_so.wsastartup = NETX_WSASTARTUP(VersionRequested, &(netx_so.wsadata));
+            netx_so.version_requested = MAKEWORD(1, 1);
+            netx_so.wsastartup = NETX_WSASTARTUP(netx_so.version_requested, &(netx_so.wsadata));
          }
       }
       if (netx_so.wsastartup == 0) {
@@ -2045,7 +2194,6 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 
 #if defined(_WIN32)
 
-   netx_so.version_requested = 0x101;
    n = netx_so.wsastartup;
    if (n != 0) {
       strcpy(pcon->error, (char *) "DLL Load Error: Unusable Winsock Library");
@@ -2118,7 +2266,7 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 	         /* Open a socket with the correct address family for this address. */
 	         pcon->cli_socket = NETX_SOCKET(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
             if (pcon->trace == 1) {
-               fprintf(pcon->pftrace, "\r\n      -> %d<=socket(%d, %d, %d)", pcon->cli_socket, ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+               fprintf(pcon->pftrace, "\r\n      -> %d<=socket(%d, %d, %d)", (int) pcon->cli_socket, ai->ai_family, ai->ai_socktype, ai->ai_protocol);
                fflush(pcon->pftrace);
             }
 
@@ -2132,7 +2280,7 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 
                result = NETX_SETSOCKOPT(pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, (const char *) &flag, sizeof(int));
                if (pcon->trace == 1) {
-                  fprintf(pcon->pftrace, "\r\n      -> %d<=setsockopt(%d, %d, %d, %p, %d)", result, pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, (const char *) &flag, (int) sizeof(int));
+                  fprintf(pcon->pftrace, "\r\n      -> %d<=setsockopt(%d, %d, %d, %p, %d)", result, (int) pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, (const char *) &flag, (int) sizeof(int));
                   fflush(pcon->pftrace);
                }
 
@@ -2281,7 +2429,7 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 
          n = NETX_BIND(pcon->cli_socket, (xLPSOCKADDR) &cli_addr, sizeof(cli_addr));
          if (pcon->trace == 1) {
-            fprintf(pcon->pftrace, "\r\n      -> %d<=bind(%d, %p, %lu)", n, (int) pcon->cli_socket, &cli_addr, sizeof(cli_addr));
+            fprintf(pcon->pftrace, "\r\n      -> %d<=bind(%d, %p, %lu)", n, (int) pcon->cli_socket, &cli_addr, (unsigned long) sizeof(cli_addr));
             fflush(pcon->pftrace);
          }
 
@@ -2381,7 +2529,7 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 
       n = NETX_BIND(pcon->cli_socket, (xLPSOCKADDR) &cli_addr, sizeof(cli_addr));
       if (pcon->trace == 1) {
-         fprintf(pcon->pftrace, "\r\n      -> %d<=bind(%d, %p, %lu)", n, (int) pcon->cli_socket, &cli_addr, sizeof(cli_addr));
+         fprintf(pcon->pftrace, "\r\n      -> %d<=bind(%d, %p, %lu)", n, (int) pcon->cli_socket, &cli_addr, (unsigned long) sizeof(cli_addr));
          fflush(pcon->pftrace);
       }
 
@@ -2407,7 +2555,7 @@ int netx_tcp_connect(NETXCON *pcon, int context)
 
          result = NETX_SETSOCKOPT(pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, (const char *) &flag, sizeof(int));
          if (pcon->trace == 1) {
-            fprintf(pcon->pftrace, "\r\n      -> %d<=setsockopt(%d, %d, %d, %p, %lu)", result, (int) pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+            fprintf(pcon->pftrace, "\r\n      -> %d<=setsockopt(%d, %d, %d, %p, %lu)", result, (int) pcon->cli_socket, IPPROTO_TCP, TCP_NODELAY, &flag, (unsigned long) sizeof(int));
             fflush(pcon->pftrace);
          }
          if (result < 0) {
