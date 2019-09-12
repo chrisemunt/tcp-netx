@@ -27,6 +27,22 @@
    ----------------------------------------------------------------------------
 */
 
+/*
+
+Change Log:
+
+Version 1.0.7 2 December 2016:
+   First release.
+
+Version 1.1.8 19 July 2019:
+   Support for Node.js v8, v10 and v12.
+   Support for sending and receiving binary data: **readbinary()** and **writebinary()** methods.
+
+Version 1.1.9 12 September 2019:
+   Replace functionality that was deprecated in Node.js/V8 v12.
+
+*/
+
 
 #if defined(_WIN32)
 #define BUILDING_NODE_EXTENSION     1
@@ -98,7 +114,7 @@
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       1
-#define NETX_VERSION_BUILD       8
+#define NETX_VERSION_BUILD       9
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -399,11 +415,15 @@ typedef struct tagNETXCON {
 
 
 #if NETX_NODE_VERSION >= 120000
-#define NETX_TO_OBJECT(a)            a->ToObject(isolate)
-#define NETX_TO_STRING(a)            a->ToString(isolate)
+#define NETX_GET(a,b)                a->Get(icontext,b).ToLocalChecked()
+#define NETX_SET(a,b,c)              a->Set(icontext,b,c).FromJust()
+#define NETX_TO_OBJECT(a)            a->ToObject(icontext).ToLocalChecked()
+#define NETX_TO_STRING(a)            a->ToString(icontext).ToLocalChecked()
 #define NETX_NUMBER_VALUE(a)         a->NumberValue(icontext).ToChecked()
 #define NETX_INT32_VALUE(a)          a->Int32Value(icontext).FromJust()
 #else
+#define NETX_GET(a,b)                a->Get(b)
+#define NETX_SET(a,b,c)              a->Set(b,c)
 #define NETX_TO_OBJECT(a)            a->ToObject()
 #define NETX_TO_STRING(a)            a->ToString()
 #define NETX_NUMBER_VALUE(a)         a->NumberValue()
@@ -609,7 +629,9 @@ public:
    static Local<String> netx_new_string8(Isolate * isolate, char * buffer, int utf8)
    {
       if (utf8) {
-#if NETX_NODE_VERSION >= 1200
+#if NETX_NODE_VERSION >= 120000
+         return String::NewFromUtf8(isolate, buffer, NewStringType::kNormal).ToLocalChecked();
+#elif NETX_NODE_VERSION >= 1200
          return String::NewFromUtf8(isolate, buffer);
 #else
          return String::NewFromUtf8(buffer);
@@ -630,7 +652,9 @@ public:
    static Local<String> netx_new_string8n(Isolate * isolate, char * buffer, unsigned long len, int utf8)
    {
       if (utf8) {
-#if NETX_NODE_VERSION >= 1200
+#if NETX_NODE_VERSION >= 120000
+         return String::NewFromUtf8(isolate, buffer, NewStringType::kNormal, len).ToLocalChecked();
+#elif NETX_NODE_VERSION >= 1200
          return String::NewFromUtf8(isolate, buffer, String::kNormalString, len);
 #else
          return String::NewFromUtf8(buffer, len);
@@ -722,6 +746,9 @@ public:
    static Local<Object> netx_result_object(server * s, int context)
    {
       Isolate* isolate = Isolate::GetCurrent();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       EscapableHandleScope handle_scope(isolate);
 
       Local<String> key;
@@ -731,62 +758,62 @@ public:
 
       if (s->pcon->error[0]) {
          key = netx_new_string8(isolate, (char *) NETX_STR_OK, 1);
-         result->Set(key, Integer::New(isolate, false));
+         NETX_SET(result, key, Integer::New(isolate, false));
 
          error = netx_new_string8(isolate, s->pcon->error, 1);
          key = netx_new_string8(isolate, (char *) NETX_STR_ERRORMESSAGE, 1);
-         result->Set(key, error);
+         NETX_SET(result, key, error);
 
          key = netx_new_string8(isolate, (char *) NETX_STR_ERRORCODE, 1);
-         result->Set(key, Integer::New(isolate, s->pcon->error_no));
+         NETX_SET(result, key, Integer::New(isolate, s->pcon->error_no));
 
          if (s->pcon->method == NETX_METHOD_HTTP || s->pcon->method == NETX_METHOD_READ) {
             s->pcon->eof = 1;
             key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
-            result->Set(key, Integer::New(isolate, s->pcon->eof));
+            NETX_SET(result, key, Integer::New(isolate, s->pcon->eof));
          }
          if (s->pcon->method == NETX_METHOD_HTTP) {
             key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
-            result->Set(key, netx_new_string8(isolate, (char *) "", 1));
+            NETX_SET(result, key, netx_new_string8(isolate, (char *) "", 1));
          }
          else if (s->pcon->method == NETX_METHOD_READ) {
             key = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
-            result->Set(key, netx_new_string8(isolate, (char *) "", 1));
+            NETX_SET(result, key, netx_new_string8(isolate, (char *) "", 1));
          }
 
 
       }
       else {
          key = netx_new_string8(isolate, (char *) NETX_STR_OK, 1);
-         result->Set(key, Integer::New(isolate, true));
+         NETX_SET(result, key, Integer::New(isolate, true));
 
          if (s->pcon->info[0]) {
             key = netx_new_string8(isolate, (char *) NETX_STR_INFORMATION, 1);
-            result->Set(key, netx_new_string8(isolate, (char *) s->pcon->info, 1));
+            NETX_SET(result, key, netx_new_string8(isolate, (char *) s->pcon->info, 1));
          }
 
          if (s->pcon->method == NETX_METHOD_HTTP) {
             key = netx_new_string8(isolate, (char *) NETX_STR_KEEPALIVE, 1);
-            result->Set(key, Integer::New(isolate, s->pcon->keepalive));
+            NETX_SET(result, key, Integer::New(isolate, s->pcon->keepalive));
 
             key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
-            result->Set(key, Integer::New(isolate, s->pcon->eof));
+            NETX_SET(result, key, Integer::New(isolate, s->pcon->eof));
             if (s->pcon->hlen) {
                key = netx_new_string8(isolate, (char *) NETX_STR_HEADERS, 1);
-               result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->hlen, 1));
+               NETX_SET(result, key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->hlen, 1));
                key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
-               result->Set(key, netx_new_string8n(isolate, (char *) (s->pcon->recv_buf + s->pcon->hlen), s->pcon->recv_buf_len- s->pcon->hlen, 1));
+               NETX_SET(result, key, netx_new_string8n(isolate, (char *) (s->pcon->recv_buf + s->pcon->hlen), s->pcon->recv_buf_len- s->pcon->hlen, 1));
             }
             else {
                key = netx_new_string8(isolate, (char *) NETX_STR_CONTENT, 1);
-               result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, 1));
+               NETX_SET(result, key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, 1));
             }
          }
          else if (s->pcon->method == NETX_METHOD_READ) {
             key = netx_new_string8(isolate, (char *) NETX_STR_EOF, 1);
-            result->Set(key, Integer::New(isolate, s->pcon->eof));
+            NETX_SET(result, key, Integer::New(isolate, s->pcon->eof));
             key = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
-            result->Set(key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, s->binary ? 0 : 1));
+            NETX_SET(result, key, netx_new_string8n(isolate, (char *) s->pcon->recv_buf, s->pcon->recv_buf_len, s->binary ? 0 : 1));
          }
       }
 
@@ -820,6 +847,9 @@ public:
 static void settrace(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
       int narg, result;
       char buffer[245];
@@ -1021,12 +1051,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       if (narg && args[0]->IsObject()) {
          request = NETX_TO_OBJECT(args[0]);
 
-         if (!request->Get(length_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(request->Get(length_name));
+         if (!NETX_GET(request, length_name)->IsUndefined()) {
+            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, length_name));
 
          }
-         if (!request->Get(timeout_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(request->Get(timeout_name));
+         if (!NETX_GET(request, timeout_name)->IsUndefined()) {
+            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, timeout_name));
          }
       }
 
@@ -1080,6 +1110,9 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
    static void write_ex(const FunctionCallbackInfo<Value>& args, short binary)   {
       Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 120000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
       short async;
       int narg;
@@ -1115,8 +1148,8 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       if (args[0]->IsObject()) {
          request = NETX_TO_OBJECT(args[0]);
 
-         if (!request->Get(content_name)->IsUndefined()) {
-            content_value = NETX_TO_STRING(request->Get(content_name));
+         if (!NETX_GET(request, content_name)->IsUndefined()) {
+            content_value = NETX_TO_STRING(NETX_GET(request, content_name));
             s->pcon->send_buf_len = content_value->Length();
             if (s->pcon->send_buf_len >= s->pcon->send_buf_size) {
                if (netx_resize(s->pcon, &(s->pcon->send_buf), &(s->pcon->send_buf_size), 0, s->pcon->send_buf_len + 32) < 0) {
@@ -1220,16 +1253,16 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          hlen = 0;
          clen = 0;
          request = NETX_TO_OBJECT(args[0]);
-         if (!request->Get(headers_name)->IsUndefined()) {
-            headers_value = NETX_TO_STRING(request->Get(headers_name));
+         if (!NETX_GET(request, headers_name)->IsUndefined()) {
+            headers_value = NETX_TO_STRING(NETX_GET(request, headers_name));
             hlen = headers_value->Length();
          }
          else {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'headers' property", 1)));
          }
 
-         if (!request->Get(content_name)->IsUndefined()) {
-            content_value = NETX_TO_STRING(request->Get(content_name));
+         if (!NETX_GET(request, content_name)->IsUndefined()) {
+            content_value = NETX_TO_STRING(NETX_GET(request, content_name));
             clen = content_value->Length();
          }
 
@@ -1244,11 +1277,11 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          }
          s->pcon->send_buf_len = hlen + clen;
 
-         if (!request->Get(length_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(request->Get(length_name));
+         if (!NETX_GET(request, length_name)->IsUndefined()) {
+            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, length_name));
          }
-         if (!request->Get(timeout_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(request->Get(timeout_name));
+         if (!NETX_GET(request, timeout_name)->IsUndefined()) {
+            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, timeout_name));
          }
       }
       else {
