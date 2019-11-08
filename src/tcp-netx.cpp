@@ -41,6 +41,9 @@ Version 1.1.8 19 July 2019:
 Version 1.1.9 12 September 2019:
    Replace functionality that was deprecated in Node.js/V8 v12.
 
+Version 1.1.10 8 November 2019:
+   Correct a fault in the processing of HTTP POST requests in the db.http() method.
+
 */
 
 
@@ -114,7 +117,7 @@ Version 1.1.9 12 September 2019:
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       1
-#define NETX_VERSION_BUILD       9
+#define NETX_VERSION_BUILD       10
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -1272,8 +1275,9 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
             }
          }
          netx_write_char8(isolate, headers_value, (char *) s->pcon->send_buf, 1);
+
          if (clen) {
-            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf + s->pcon->send_buf_len, 1);
+            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf + hlen, 1);
          }
          s->pcon->send_buf_len = hlen + clen;
 
