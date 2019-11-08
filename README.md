@@ -3,7 +3,7 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-12 September 2019, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+8 November 2019, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
 * Verified to work with Node.js v4 to v12.
 * [Release Notes](#RelNotes) can be found at the end of this document.
@@ -260,3 +260,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v1.1.9 (12 September 2019)
 
 * Internal changes to replace V8/Node.js API functionality that was deprecated in Node.js v12.
+
+### v1.1.10 (8 November 2019)
+
+* Correct a fault in the processing of HTTP POST requests in the db.http() method.
