@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2019 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2016-2020 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -43,6 +43,12 @@ Version 1.1.9 12 September 2019:
 
 Version 1.1.10 8 November 2019:
    Correct a fault in the processing of HTTP POST requests in the db.http() method.
+
+Version 1.2.11 6 May 2020:
+   Verify that the code base works with Node.js v14.x.x.
+   Introduce support for Node.js/V8 worker threads (for Node.js v12.x.x. and later).
+   Correct a fault in the processing of error conditions (e.g. 'server not available' etc..).
+   Suppress a number of benign 'cast-function-type' compiler warnings when building on the Raspberry Pi.
 
 */
 
@@ -108,6 +114,16 @@ Version 1.1.10 8 November 2019:
 
 #endif /* #if defined(_WIN32) */
 
+#if defined(__GNUC__) && __GNUC__ >= 8
+#define DISABLE_WCAST_FUNCTION_TYPE _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+#define DISABLE_WCAST_FUNCTION_TYPE_END _Pragma("GCC diagnostic pop")
+#else
+#define DISABLE_WCAST_FUNCTION_TYPE
+#define DISABLE_WCAST_FUNCTION_TYPE_END
+#endif
+
+DISABLE_WCAST_FUNCTION_TYPE
+
 #include <v8.h>
 #include <node.h>
 #include <node_version.h>
@@ -116,8 +132,8 @@ Version 1.1.10 8 November 2019:
 #include <node_object_wrap.h>
 
 #define NETX_VERSION_MAJOR       1
-#define NETX_VERSION_MINOR       1
-#define NETX_VERSION_BUILD       10
+#define NETX_VERSION_MINOR       2
+#define NETX_VERSION_BUILD       11
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -424,6 +440,13 @@ typedef struct tagNETXCON {
 #define NETX_TO_STRING(a)            a->ToString(icontext).ToLocalChecked()
 #define NETX_NUMBER_VALUE(a)         a->NumberValue(icontext).ToChecked()
 #define NETX_INT32_VALUE(a)          a->Int32Value(icontext).FromJust()
+#elif NETX_NODE_VERSION >= 100000
+#define NETX_GET(a,b)                a->Get(icontext,b).ToLocalChecked()
+#define NETX_SET(a,b,c)              a->Set(icontext,b,c).FromJust()
+#define NETX_TO_OBJECT(a)            a->ToObject(icontext).ToLocalChecked()
+#define NETX_TO_STRING(a)            a->ToString(icontext).ToLocalChecked()
+#define NETX_NUMBER_VALUE(a)         a->NumberValue(icontext).ToChecked()
+#define NETX_INT32_VALUE(a)          a->Int32Value(icontext).FromJust()
 #else
 #define NETX_GET(a,b)                a->Get(b)
 #define NETX_SET(a,b,c)              a->Set(b,c)
@@ -446,6 +469,12 @@ typedef struct tagNETXCON {
 */
 
 static NETXSOCK       netx_so        = {0, 0, 0, 0, 0, 0, 0, {'\0'}};
+
+#if defined(_WIN32)
+CRITICAL_SECTION  netx_async_mutex;
+#else
+pthread_mutex_t   netx_async_mutex        = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 
 using namespace node;
@@ -477,6 +506,30 @@ int      netx_tcp_read              (NETXCON *pcon, unsigned char *data, int siz
 int      netx_get_last_error        (int context);
 int      netx_get_error_message     (int error_code, char *message, int size, int context);
 int      netx_get_std_error_message (int error_code, char *message, int size, int context);
+int      netx_enter_critical_section(void *p_crit);
+int      netx_leave_critical_section(void *p_crit);
+
+
+
+#if defined(_WIN32)
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
+{
+   switch (fdwReason)
+   { 
+      case DLL_PROCESS_ATTACH:
+         InitializeCriticalSection(&netx_async_mutex);
+         break;
+      case DLL_THREAD_ATTACH:
+         break;
+      case DLL_THREAD_DETACH:
+         break;
+      case DLL_PROCESS_DETACH:
+         DeleteCriticalSection(&netx_async_mutex);
+         break;
+   }
+   return TRUE;
+}
+#endif
 
 
 class server : public node::ObjectWrap
@@ -498,11 +551,10 @@ public:
 
    static Persistent<Function> s_ct;
 
-
 #if NETX_NODE_VERSION >= 100000
-   static void Init(Local<Object> target)
+   static void Init(Local<Object> exports)
 #else
-   static void Init(Handle<Object> target)
+   static void Init(Handle<Object> exports)
 #endif
    {
       Isolate* isolate = Isolate::GetCurrent();
@@ -525,10 +577,10 @@ public:
 #if NETX_NODE_VERSION >= 120000
       Local<Context> icontext = isolate->GetCurrentContext();
       s_ct.Reset(isolate, t->GetFunction(icontext).ToLocalChecked());
-      target->Set(icontext, netx_new_string8(isolate, (char *) "server", 1), t->GetFunction(icontext).ToLocalChecked()).FromJust();
+      exports->Set(icontext, netx_new_string8(isolate, (char *) "server", 1), t->GetFunction(icontext).ToLocalChecked()).FromJust();
 #else
       s_ct.Reset(isolate, t->GetFunction());
-      target->Set(netx_new_string8(isolate, (char *) "server", 1), t->GetFunction());
+      exports->Set(netx_new_string8(isolate, (char *) "server", 1), t->GetFunction());
 #endif
 
 
@@ -552,7 +604,7 @@ public:
    {
       int narg;
       Isolate* isolate = Isolate::GetCurrent();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       HandleScope scope(isolate);
@@ -563,6 +615,7 @@ public:
       narg = args.Length();
       if (narg < 2) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
+         return;
       }
 
       Local<String> ip = NETX_TO_STRING(args[0]);
@@ -749,7 +802,7 @@ public:
    static Local<Object> netx_result_object(server * s, int context)
    {
       Isolate* isolate = Isolate::GetCurrent();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       EscapableHandleScope handle_scope(isolate);
@@ -837,6 +890,7 @@ public:
       narg = args.Length();
       if (narg > 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "The version method does not take any arguments", 1)));
+         return;
       }
 
       sprintf(buffer, "%d.%d.%d", NETX_VERSION_MAJOR, NETX_VERSION_MINOR, NETX_VERSION_BUILD);
@@ -850,7 +904,7 @@ public:
 static void settrace(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       HandleScope scope(isolate);
@@ -863,6 +917,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 1) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "The settrace method takes one argument", 1)));
+         return;
       }
 
       netx_write_char8(isolate, NETX_TO_STRING(args[0]), buffer, 1);
@@ -926,6 +981,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          if (!s->pcon) {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate connection memory block", 1)));
+            return;
          }
          memset((void *) s->pcon, 0, sizeof(NETXCON));
 
@@ -935,12 +991,14 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          s->pcon->send_buf = (unsigned char *) netx_malloc(sizeof(char) * NETX_RECV_BUFFER, 0);
          if (!s->pcon->send_buf) {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
+            return;
          }
          s->pcon->send_buf[0] = '\0';
          s->pcon->send_buf_size = NETX_RECV_BUFFER - 1;
          s->pcon->recv_buf = (unsigned char *) netx_malloc(sizeof(char) * NETX_RECV_BUFFER, 0);
          if (!s->pcon->recv_buf) {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for recv buffer", 1)));
+            return;
          }
          s->pcon->recv_buf[0] = '\0';
          s->pcon->recv_buf_size = NETX_RECV_BUFFER - 1;
@@ -952,6 +1010,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *)"Unable to process arguments", 1)));
+         return;
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1015,7 +1074,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
    static void read_ex(const FunctionCallbackInfo<Value>& args, short binary)
    {
       Isolate* isolate = args.GetIsolate();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       HandleScope scope(isolate);
@@ -1028,6 +1087,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       if (!s->pcon) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
+         return;
       }
 
       s->pcon->method = NETX_METHOD_READ;
@@ -1035,6 +1095,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
+         return;
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1113,7 +1174,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
    static void write_ex(const FunctionCallbackInfo<Value>& args, short binary)   {
       Isolate* isolate = args.GetIsolate();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       HandleScope scope(isolate);
@@ -1125,6 +1186,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       s->binary = binary;
       if (!s->pcon) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
+         return;
       }
 
       s->pcon->method = NETX_METHOD_WRITE;
@@ -1132,6 +1194,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
+         return;
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1157,16 +1220,19 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
             if (s->pcon->send_buf_len >= s->pcon->send_buf_size) {
                if (netx_resize(s->pcon, &(s->pcon->send_buf), &(s->pcon->send_buf_size), 0, s->pcon->send_buf_len + 32) < 0) {
                   isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
+                  return;
                }
             }
             netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf, s->binary ? 0 : 1);
          }
          else {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'data' property", 1)));
+            return;
          }
       }
       else {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing data object", 1)));
+         return;
       }
 
       if (async) {
@@ -1206,7 +1272,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
    static void http(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 100000
       Local<Context> icontext = isolate->GetCurrentContext();
 #endif
       HandleScope scope(isolate);
@@ -1218,9 +1284,11 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       s->s_count ++;
       if (!s->pcon) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
+         return;
       }
       if (s->pcon->connected == 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Disconnected from server", 1)));
+         return;
       }
 
       s->pcon->method = NETX_METHOD_HTTP;
@@ -1228,6 +1296,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 1) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
+         return;
       }
       if (narg > 1 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1262,6 +1331,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          }
          else {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'headers' property", 1)));
+            return;
          }
 
          if (!NETX_GET(request, content_name)->IsUndefined()) {
@@ -1272,6 +1342,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          if ((hlen + clen) >= s->pcon->send_buf_size) {
             if (netx_resize(s->pcon, &(s->pcon->send_buf), &(s->pcon->send_buf_size), 0, hlen + clen + 32) < 0) {
                isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to allocate memory for send buffer", 1)));
+               return;
             }
          }
          netx_write_char8(isolate, headers_value, (char *) s->pcon->send_buf, 1);
@@ -1290,6 +1361,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       }
       else {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing request object", 1)));
+         return;
       }
 
       if (async) {
@@ -1338,6 +1410,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       s->s_count ++;
       if (!s->pcon) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "No connection to server established", 1)));
+         return;
       }
 
       s->pcon->method = NETX_METHOD_DISCONNECT;
@@ -1345,6 +1418,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       narg = args.Length();
       if (narg < 0) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
+         return;
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
          async = 1;
@@ -1391,28 +1465,102 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
 };
 
+
+/* v1.2.11 */
+#if NETX_NODE_VERSION >= 120000
+class netx_addon_data
+{
+
+public:
+
+   netx_addon_data(Isolate* isolate, Local<Object> exports):
+      call_count(0) {
+         /* Link the existence of this object instance to the existence of exports. */
+         exports_.Reset(isolate, exports);
+         exports_.SetWeak(this, DeleteMe, WeakCallbackType::kParameter);
+      }
+
+   ~netx_addon_data() {
+      if (!exports_.IsEmpty()) {
+         /* Reset the reference to avoid leaking data. */
+         exports_.ClearWeak();
+         exports_.Reset();
+      }
+   }
+
+   /* Per-addon data. */
+   int call_count;
+
+private:
+
+   /* Method to call when "exports" is about to be garbage-collected. */
+   static void DeleteMe(const WeakCallbackInfo<netx_addon_data>& info) {
+      delete info.GetParameter();
+   }
+
+   /*
+   Weak handle to the "exports" object. An instance of this class will be
+   destroyed along with the exports object to which it is weakly bound.
+   */
+   v8::Persistent<v8::Object> exports_;
+};
+#endif
+
+
 Persistent<Function> server::s_ct;
+
 
 extern "C" {
 #if defined(_WIN32)
 #if NETX_NODE_VERSION >= 100000
-void __declspec(dllexport) init (Local<Object> target)
+void __declspec(dllexport) init (Local<Object> exports)
 #else
-void __declspec(dllexport) init (Handle<Object> target)
+void __declspec(dllexport) init (Handle<Object> exports)
 #endif
 #else
 #if NETX_NODE_VERSION >= 100000
-static void init (Local<Object> target)
+static void init (Local<Object> exports)
 #else
-static void init (Handle<Object> target)
+static void init (Handle<Object> exports)
 #endif
 #endif
-   {
-       server::Init(target);
-   }
+ {
+   server::Init(exports);
+ }
 
-   NODE_MODULE(server, init);
+#if NETX_NODE_VERSION >= 120000
+
+/* exports, module, context */
+extern "C" NODE_MODULE_EXPORT void
+NODE_MODULE_INITIALIZER(Local<Object> exports,
+                        Local<Value> module,
+                        Local<Context> context) {
+   Isolate* isolate = context->GetIsolate();
+
+   /* Create a new instance of netx_addon_data for this instance of the addon. */
+   netx_addon_data * data = new netx_addon_data(isolate, exports);
+   /* Wrap the data in a v8::External so we can pass it to the method we expose. */
+   /* Local<External> external = External::New(isolate, data); */
+   External::New(isolate, data);
+
+   init(exports);
+
+   /*
+   Expose the method "Method" to JavaScript, and make sure it receives the
+   per-addon-instance data we created above by passing `external` as the
+   third parameter to the FunctionTemplate constructor.
+   exports->Set(context, String::NewFromUtf8(isolate, "method", NewStringType::kNormal).ToLocalChecked(), FunctionTemplate::New(isolate, Method, external)->GetFunction(context).ToLocalChecked()).FromJust();
+   */
+
 }
+
+#else
+
+  NODE_MODULE(server, init)
+
+#endif
+}
+
 
 int netx_connect(NETXCON *pcon)
 {
@@ -1424,12 +1572,16 @@ int netx_connect(NETXCON *pcon)
    }
 
 #if defined(_WIN32)
+   netx_enter_critical_section((void *) &netx_async_mutex);
    if (netx_so.winsock_ready == 0) {
+
       rc = netx_load_winsock(pcon, 0);
       if (rc) {
+         netx_leave_critical_section((void *) &netx_async_mutex);
          return 0;
       }
    }
+   netx_leave_critical_section((void *) &netx_async_mutex);
 #endif
    if (pcon->connected) {
       rc = 0;
@@ -2936,7 +3088,7 @@ int netx_tcp_read(NETXCON *pcon, unsigned char *data, int size, int timeout, int
       }
 
       len += n;
-      if (context) { /* Must read length requested cmtxxx */
+      if (context) { /* Must read length requested v1.1.10 */
          if (len == size) {
             break;
          }
@@ -3370,3 +3522,30 @@ int netx_get_std_error_message(int error_code, char *message, int size, int cont
    return (int) strlen(message);
 }
 
+
+int netx_enter_critical_section(void *p_crit)
+{
+   int result;
+
+#if defined(_WIN32)
+   EnterCriticalSection((LPCRITICAL_SECTION) p_crit);
+   result = 0;
+#else
+   result = pthread_mutex_lock((pthread_mutex_t *) p_crit);
+#endif
+   return result;
+}
+
+
+int netx_leave_critical_section(void *p_crit)
+{
+   int result;
+
+#if defined(_WIN32)
+   LeaveCriticalSection((LPCRITICAL_SECTION) p_crit);
+   result = 0;
+#else
+   result = pthread_mutex_unlock((pthread_mutex_t *) p_crit);
+#endif
+   return result;
+}
