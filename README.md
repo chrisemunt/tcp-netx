@@ -3,9 +3,9 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-8 November 2019, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+6 May 2020, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Verified to work with Node.js v4 to v12.
+* Verified to work with Node.js v4 to v14.
 * [Release Notes](#RelNotes) can be found at the end of this document.
 
 ## Acknowledgements
@@ -213,6 +213,39 @@ Result Object:
      
 If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
+#### Using Node.js/V8 worker threads
+
+**tcp-netx** functionality can now be used with Node.js/V8 worker threads.  This enhancement is available with Node.js v12 (and later).
+
+The following scheme illustrates how **tcp-netx** should be used in threaded Node.js applications.
+
+
+       const { Worker, isMainThread, parentPort, threadId } = require('worker_threads');
+
+       if (isMainThread) {
+          // start the threads
+          const worker1 = new Worker(__filename);
+          const worker2 = new Worker(__filename);
+
+          // process messages received from threads
+          worker1.on('message', (message) => {
+             console.log(message);
+          });
+          worker2.on('message', (message) => {
+             console.log(message);
+          });
+       } else {
+          var tcp = require('tcp-netx');
+          var db = new tcp.server(<server>, <port>);
+          var result = db.connect();
+
+          // do some work
+
+          var result = db.disconnect();
+          // tell the parent that we're done
+          parentPort.postMessage("threadId=" + threadId + " Done");
+       }
+
 #### Function call trace
 
 **tcp-netx** contains a function call trace and logging facility to help with troubleshooting problems in operation.
@@ -231,7 +264,7 @@ To disable the trace facility:
 
 ## License
 
-Copyright (c) 2016-2017 M/Gateway Developments Ltd,
+Copyright (c) 2016-2020 M/Gateway Developments Ltd,
 Surrey UK.                                                      
 All rights reserved.
  
@@ -264,3 +297,13 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v1.1.10 (8 November 2019)
 
 * Correct a fault in the processing of HTTP POST requests in the db.http() method.
+
+### v1.2.11 (6 May 2020)
+
+* Verify that **tcp-netx** will build and work with Node.js v14.x.x.
+* Introduce support for Node.js/V8 worker threads (for Node.js v12.x.x. and later).
+	* See the section on 'Using Node.js/V8 worker threads'.
+* Correct a fault in the processing of error conditions (e.g. 'server not available' etc..).
+* Suppress a number of benign 'cast-function-type' compiler warnings when building on the Raspberry Pi.
+
+
