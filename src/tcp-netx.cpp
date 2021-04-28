@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2020 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2016-2021 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -49,6 +49,11 @@ Version 1.2.11 6 May 2020:
    Introduce support for Node.js/V8 worker threads (for Node.js v12.x.x. and later).
    Correct a fault in the processing of error conditions (e.g. 'server not available' etc..).
    Suppress a number of benign 'cast-function-type' compiler warnings when building on the Raspberry Pi.
+
+Version 1.2.12 28 April 2021:
+   Verify that the code base works with Node.js v16.x.x.
+   Fix A number of faults related to the use of tcp-netx functionality in Node.js/v8 worker threads.
+   - Notably, callback functions were not being fired correctly for some asynchronous invocations of tcp-netx methods.
 
 */
 
@@ -133,7 +138,7 @@ DISABLE_WCAST_FUNCTION_TYPE
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       2
-#define NETX_VERSION_BUILD       11
+#define NETX_VERSION_BUILD       12
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -633,9 +638,10 @@ public:
 
 
    struct netx_baton_t {
-      server                 *s;
+      server                  *s;
       int                     increment_by;
       Persistent<Function>    cb;
+      Isolate                 *isolate;
    };
 
 
@@ -662,6 +668,23 @@ public:
       if (baton) {
          delete baton;
       }
+
+      return 0;
+   }
+
+
+   /* v1.2.12 */
+   static int netx_queue_task(void *work_cb, void *after_work_cb, netx_baton_t *baton, short context)
+   {
+      uv_work_t *_req = new uv_work_t;
+      _req->data = baton;
+
+      /* v1.2.12 */
+#if NETX_NODE_VERSION >= 120000
+      uv_queue_work(GetCurrentEventLoop(baton->isolate), _req, (uv_work_cb) work_cb, (uv_after_work_cb) after_work_cb);
+#else
+      uv_queue_work(uv_default_loop(), _req, (uv_work_cb) work_cb, (uv_after_work_cb) after_work_cb);
+#endif
 
       return 0;
    }
@@ -1027,13 +1050,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          Local<Function> cb = Local<Function>::Cast(args[narg]);
          netx_baton_t *baton = netx_make_baton(s, narg, args);
+         baton->isolate = isolate;
          baton->cb.Reset(isolate, cb);
 
          s->Ref();
 
-         uv_work_t *_req = new uv_work_t;
-         _req->data = baton;
-         uv_queue_work(uv_default_loop(), _req, EIO_connect, netx_invoke_callback);
+         netx_queue_task((void *) EIO_connect, (void *) netx_invoke_callback, baton, 0); /* v1.2.12 */
 
          return;
       }
@@ -1128,13 +1150,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          Local<Function> cb = Local<Function>::Cast(args[narg]);
          netx_baton_t *baton = netx_make_baton(s, narg, args);
+         baton->isolate = isolate;
          baton->cb.Reset(isolate, cb);
 
          s->Ref();
 
-         uv_work_t *_req = new uv_work_t;
-         _req->data = baton;
-         uv_queue_work(uv_default_loop(), _req, EIO_read, netx_invoke_callback);
+         netx_queue_task((void *) EIO_read, (void *) netx_invoke_callback, baton, 0); /* v1.2.12 */
 
          return;
       }
@@ -1239,13 +1260,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          Local<Function> cb = Local<Function>::Cast(args[narg]);
          netx_baton_t *baton = netx_make_baton(s, narg, args);
+         baton->isolate = isolate;
          baton->cb.Reset(isolate, cb);
 
          s->Ref();
 
-         uv_work_t *_req = new uv_work_t;
-         _req->data = baton;
-         uv_queue_work(uv_default_loop(), _req, EIO_write, netx_invoke_callback);
+         netx_queue_task((void *) EIO_write, (void *) netx_invoke_callback, baton, 0); /* v1.2.12 */
 
          return;
       }
@@ -1367,15 +1387,14 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       if (async) {
 
          Local<Function> cb = Local<Function>::Cast(args[narg]);
-
          netx_baton_t *baton = netx_make_baton(s, narg, args);
+         baton->isolate = isolate;
          baton->cb.Reset(isolate, cb);
 
          s->Ref();
 
-         uv_work_t *_req = new uv_work_t;
-         _req->data = baton;
-         uv_queue_work(uv_default_loop(), _req, EIO_http, netx_invoke_callback);
+         netx_queue_task((void *) EIO_http, (void *) netx_invoke_callback, baton, 0); /* v1.2.12 */
+
          return;
       }
 
@@ -1432,13 +1451,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          Local<Function> cb = Local<Function>::Cast(args[narg]);
          netx_baton_t *baton = netx_make_baton(s, narg, args);
+         baton->isolate = isolate;
          baton->cb.Reset(isolate, cb);
 
          s->Ref();
 
-         uv_work_t *_req = new uv_work_t;
-         _req->data = baton;
-         uv_queue_work(uv_default_loop(), _req, EIO_disconnect, netx_invoke_callback);
+         netx_queue_task((void *) EIO_disconnect, (void *) netx_invoke_callback, baton, 0); /* v1.2.12 */
 
          return;
       }
