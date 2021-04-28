@@ -264,7 +264,7 @@ To disable the trace facility:
 
 ## License
 
-Copyright (c) 2016-2020 M/Gateway Developments Ltd,
+Copyright (c) 2016-2021 M/Gateway Developments Ltd,
 Surrey UK.                                                      
 All rights reserved.
  
