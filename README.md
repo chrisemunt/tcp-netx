@@ -3,9 +3,9 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-6 May 2020, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+28 April 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Verified to work with Node.js v4 to v14.
+* Verified to work with Node.js v4 to v16.
 * [Release Notes](#RelNotes) can be found at the end of this document.
 
 ## Acknowledgements
@@ -306,4 +306,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 * Correct a fault in the processing of error conditions (e.g. 'server not available' etc..).
 * Suppress a number of benign 'cast-function-type' compiler warnings when building on the Raspberry Pi.
 
+### v1.2.12 (28 April 2021)
 
+* Verify that **tcp-netx** will build and work with Node.js v16.x.x.
+* A number of faults related to the use of **tcp\-netx** functionality in Node.js/v8 worker threads have been corrected.  In particular, it was noticed that callback functions were not being fired correctly for some asynchronous invocations of **tcp\-netx** methods.

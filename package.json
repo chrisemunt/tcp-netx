@@ -6,7 +6,7 @@
   },
   "name": "tcp-netx",
   "description": "Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "maintainers": "Chris Munt <cmunt@mgateway.com>",
   "homepage": "https://github.com/chrisemunt/tcp-netx",
   "repository": {
