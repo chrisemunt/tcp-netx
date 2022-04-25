@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2021 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2016-2022 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -54,6 +54,10 @@ Version 1.2.12 28 April 2021:
    Verify that the code base works with Node.js v16.x.x.
    Fix A number of faults related to the use of tcp-netx functionality in Node.js/v8 worker threads.
    - Notably, callback functions were not being fired correctly for some asynchronous invocations of tcp-netx methods.
+
+Version 1.2.12a 25 April 2022:
+   Verify that tcp-netx.node will build and work with Node.js v18.x.x. (ABI: 108).
+
 
 */
 
