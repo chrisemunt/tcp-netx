@@ -3,9 +3,9 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-28 April 2021, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+25 April 2022, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
-* Verified to work with Node.js v4 to v16.
+* Verified to work with Node.js v4 to v18.
 * [Release Notes](#RelNotes) can be found at the end of this document.
 
 ## Acknowledgements
@@ -264,7 +264,7 @@ To disable the trace facility:
 
 ## License
 
-Copyright (c) 2016-2021 M/Gateway Developments Ltd,
+Copyright (c) 2016-2022 M/Gateway Developments Ltd,
 Surrey UK.                                                      
 All rights reserved.
  
@@ -310,3 +310,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 * Verify that **tcp-netx** will build and work with Node.js v16.x.x.
 * A number of faults related to the use of **tcp\-netx** functionality in Node.js/v8 worker threads have been corrected.  In particular, it was noticed that callback functions were not being fired correctly for some asynchronous invocations of **tcp\-netx** methods.
+
+### v1.2.12a (25 April 2022)
+
+* Verify that **tcp-netx** will build and work with Node.js v18.x.x.
+
