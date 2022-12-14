@@ -86,7 +86,7 @@ For example, create a server connection object for a local web server listening 
        var db = new tcp.server("localhost", 80);
 
 
-##### Return the version of tcp-netx
+#### Return the version of tcp-netx
 
        var result = db.version();
 
@@ -95,7 +95,7 @@ Example:
        console.log("\nTCP-NETX Version: " + db.version());
 
 
-##### Modify the default timeout for tcp-netx methods
+#### Modify the default timeout for tcp-netx methods
 
 The default timeout applied to all **tcp-netx** methods is 10 seconds.  The **timeout()** method can be used to modify this value.
 
