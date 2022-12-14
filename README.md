@@ -3,18 +3,31 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-25 April 2022, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
+14 December 2022, M/Gateway Developments Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
 * Verified to work with Node.js v4 to v18.
-* [Release Notes](#RelNotes) can be found at the end of this document.
+* [Release Notes](#relnotes) can be found at the end of this document.
 
-## Acknowledgements
+Contents
 
-Special thanks to the Ripple Foundation [http://rippleosi.org](http://rippleosi.org) for
-support and funding of this project.
+* [Acknowledgements](#acknowledgements") 
+* [Prerequisites](#prereq") 
+* [Installing tcp-netx](#install)
+* [Connecting to the server](#connect)
+* [Reading and Writing](#readwrite)
+* [HTTP requests](#http)
+* [Troubleshooting](#debug)
+* [Using Node.js/V8 worker threads](#threads)
+* [License](#license)
 
 
-## Pre-requisites 
+## <a name="acknowledgements">Acknowledgements</a>
+
+Special thanks to the Ripple Foundation [https://www.ripple.foundation/](https://www.ripple.foundation/) for
+support and funding the initial phase of this project.
+
+
+## <a name="prereq">Prerequisites</a>
 
 **tcp-netx** is a Node.js addon written in C++.  It is distributed as C++ source code and the NPM installation procedure will expect a C++ compiler to be present on the target system.
 
@@ -43,7 +56,8 @@ Alternatively there are built Windows x64 binaries available from:
 
 * [https://github.com/chrisemunt/tcp-netx/blob/master/bin/winx64](https://github.com/chrisemunt/tcp-netx/blob/master/bin/winx64)
 
-## Installing tcp-netx
+
+## <a name="install">Installing tcp-netx</a>
 
 Assuming that Node.js is already installed and a C++ compiler is available to the installation process:
 
@@ -51,7 +65,8 @@ Assuming that Node.js is already installed and a C++ compiler is available to th
 
 This command will create the **tcp-netx** addon (*tcp-netx.node*).
 
-## Documentation
+
+## <a name="connect">Connecting to the server</a>
 
 Most **tcp-netx** methods are capable of operating either synchronously or asynchronously. For an operation to complete asynchronously, simply supply a suitable callback as the last argument in the call.
 
@@ -59,7 +74,10 @@ The first step is to add **tcp-netx** to your Node.js script
 
        var tcp = require('tcp-netx');
 
-#### Create a Server Object
+
+### Create a Server Object
+
+The second step is to create a Server Object.  This method does not actually create a connection; it simply registers the server host name and the TCP port on which it is listening.
 
        var db = new tcp.server(<server name>, <port>);
 
@@ -68,7 +86,7 @@ For example, create a server connection object for a local web server listening 
        var db = new tcp.server("localhost", 80);
 
 
-#### Return the version of tcp-netx
+##### Return the version of tcp-netx
 
        var result = db.version();
 
@@ -76,15 +94,39 @@ Example:
 
        console.log("\nTCP-NETX Version: " + db.version());
 
-#### Create a connection to the Server
+
+##### Modify the default timeout for tcp-netx methods
+
+The default timeout applied to all **tcp-netx** methods is 10 seconds.  The **timeout()** method can be used to modify this value.
+
+       var timeout = db.timeout([modified timeout]);
+
+Timeouts for **tcp-netx** methods are specified in seconds.
+
+Example 1 (returning the existing timeout value):
+
+       var timeout = db.timeout();
+
+Example 2 (resetting the default timeout to 30 seconds):
+
+       var timeout = db.timeout(30);
+
+Several methods allow for the timeout to be modified on a per-operation basis.
+
+
+### Connect to the Server
+
+Having created a Server Object, a connection can be made.
+
+Optionally, the **connect()** method may be supplied with an object to specify a *timeout* for the connect operation (in seconds).
 
 Synchronous:
 
-       var result = db.connect();
+       var result = db.connect([{timeout: <timeout>}]);
 
 Asynchronous:
 
-       db.connect(callback(<error>, <result>));
+       db.connect([{timeout: <timeout>}, ]callback(<error>, <result>));
       
 Result Object:
 
@@ -96,8 +138,39 @@ Result Object:
      
 If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
 
+Example 1 (connect to the server using the default timeout):
 
-#### Write to the Server
+       var result = db.connect();
+
+Example 2 (connect to the server with a timeout of 60 seconds):
+
+       var result = db.connect({timeout: 60});
+
+
+#### Disconnect from the Server
+
+Synchronous:
+
+       var result = db.disconnect();
+
+Asynchronous:
+
+       db.disconnect(callback(<error>, <result>));
+
+Result Object:
+
+       {
+          ok: <ok flag>
+          [, ErrorMessage: <message>]
+          [, ErrorCode: <code>]
+       }
+     
+If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
+
+
+## <a name="readwrite">Reading and Writing</a>
+
+### Write to the Server
 
 The default character encoding for the **write()** method is UTF8.  To write binary data to the server use the **writebinary()** method instead.
 
@@ -124,8 +197,9 @@ If the operation is successful, the *ok flag* will be set to *true*. Otherwise, 
 Example: *Send "PING" to the server*
 
        var result = db.write({data: "PING"});
+
        
-#### Read from the Server
+### Read from the Server
 
 The default character encoding for the **read()** method is UTF8.  To read binary data from the server use the **readbinary()** method instead.
 
@@ -158,8 +232,11 @@ If no *length* is specified, the method will return as much data as is currently
 Example: *Read 4 Bytes from the server with a timeout of 30 seconds*
 
        var result = db.read({length: 4, timeout: 30});
-       
-#### Send an HTTP Request to a Web Server
+
+
+## <a name="http">HTTP requests</a>
+
+### Sending an HTTP Request to a Web Server
 
 The request object sent to the web server must, at the very least, contain the HTTP request headers in the *headers* field.  Optionally, the request may include a payload in the *content* field and a *timeout* may also be specified (in seconds).
 
@@ -193,27 +270,8 @@ Example: *Request /index.html from the web server*
 
        var result = db.http({headers: "GET /index.html HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n"});
 
-#### Disconnect from the Server
 
-Synchronous:
-
-       var result = db.disconnect();
-
-Asynchronous:
-
-       db.disconnect(callback(<error>, <result>));
-
-Result Object:
-
-       {
-          ok: <ok flag>
-          [, ErrorMessage: <message>]
-          [, ErrorCode: <code>]
-       }
-     
-If the operation is successful, the *ok flag* will be set to *true*. Otherwise, the *ok flag* will be set to *false* and error information will be returned in the *ErrorMessage* and *ErrorCode* fields.
-
-#### Using Node.js/V8 worker threads
+## <a name="threads">Using Node.js/V8 worker threads</a>
 
 **tcp-netx** functionality can now be used with Node.js/V8 worker threads.  This enhancement is available with Node.js v12 (and later).
 
@@ -246,7 +304,8 @@ The following scheme illustrates how **tcp-netx** should be used in threaded Nod
           parentPort.postMessage("threadId=" + threadId + " Done");
        }
 
-#### Function call trace
+
+## <a name="debug">Troubleshooting</a>
 
 **tcp-netx** contains a function call trace and logging facility to help with troubleshooting problems in operation.
 
@@ -262,7 +321,8 @@ To disable the trace facility:
 
        var result = db.settrace(0);
 
-## License
+
+## <a name="license">License</a>
 
 Copyright (c) 2016-2022 M/Gateway Developments Ltd,
 Surrey UK.                                                      
@@ -279,7 +339,7 @@ Licensed under the Apache License, Version 2.0 (the "License"); you may not use 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.      
 
 
-## <a name="RelNotes"></a>Release Notes
+## <a name="relnotes">Release Notes</a>
 
 ### v1.0.7 (2 December 2016)
 
@@ -314,4 +374,10 @@ Unless required by applicable law or agreed to in writing, software distributed 
 ### v1.2.12a (25 April 2022)
 
 * Verify that **tcp-netx** will build and work with Node.js v18.x.x.
+
+### v1.3.13 (14 December 2022)
+
+* Correct a fault in the processing of timeouts specified in the **read()** and **http()** methods.
+* Allow a timeout to be specified for the **connect()** method.
+* Introduce a **timeout()** method to allow the default timeout applied to all **tcp-netx** methods to be changed.  The initial default timeout for all methods is set to 10 seconds.
 
