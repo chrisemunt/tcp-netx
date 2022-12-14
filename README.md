@@ -10,8 +10,8 @@ Chris Munt <cmunt@mgateway.com>
 
 Contents
 
-* [Acknowledgements](#acknowledgements") 
-* [Prerequisites](#prereq") 
+* [Acknowledgements](#acknowledgements)
+* [Prerequisites](#prereq)
 * [Installing tcp-netx](#install)
 * [Connecting to the server](#connect)
 * [Reading and Writing](#readwrite)
