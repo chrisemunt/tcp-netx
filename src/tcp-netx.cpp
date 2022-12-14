@@ -58,6 +58,11 @@ Version 1.2.12 28 April 2021:
 Version 1.2.12a 25 April 2022:
    Verify that tcp-netx.node will build and work with Node.js v18.x.x. (ABI: 108).
 
+Version 1.3.13 14 December 2022:
+   Correct a fault in the processing of timeouts specified in the read() and http() methods.
+   Allow a timeout to be specified for the connect() method.
+   Introduce a timeout() method to allow the default timeout applied to all tcp-netx methods to be changed.
+   - The initial default timeout for all methods is set to 10 seconds.
 
 */
 
@@ -141,8 +146,8 @@ DISABLE_WCAST_FUNCTION_TYPE
 #include <node_object_wrap.h>
 
 #define NETX_VERSION_MAJOR       1
-#define NETX_VERSION_MINOR       2
-#define NETX_VERSION_BUILD       12
+#define NETX_VERSION_MINOR       3
+#define NETX_VERSION_BUILD       13
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -207,6 +212,7 @@ DISABLE_WCAST_FUNCTION_TYPE
 #define NETX_INET_ADDR               netx_so.p_inet_addr
 #define NETX_INET_NTOA               netx_so.p_inet_ntoa
 #define NETX_SOCKET                  netx_so.p_socket
+#define NETX_IOCTLSOCKET             netx_so.p_ioctlsocket
 #define NETX_SETSOCKOPT              netx_so.p_setsockopt
 #define NETX_GETSOCKOPT              netx_so.p_getsockopt
 #define NETX_GETSOCKNAME             netx_so.p_getsockname
@@ -274,6 +280,7 @@ typedef size_t          socklen_netx;
 #define NETX_INET_ADDR               inet_addr
 #define NETX_INET_NTOA               inet_ntoa
 #define NETX_SOCKET                  socket
+#define NETX_IOCTLSOCKET             ioctlsocket
 #define NETX_SETSOCKOPT              setsockopt
 #define NETX_GETSOCKOPT              getsockopt
 #define NETX_GETSOCKNAME             getsockname
@@ -402,6 +409,7 @@ typedef struct tagNETXSOCK {
    LPFN_INET_NTOA                p_inet_ntoa;
 
    LPFN_SOCKET                   p_socket;
+   LPFN_IOCTLSOCKET              p_ioctlsocket;
    LPFN_SETSOCKOPT               p_setsockopt;
    LPFN_GETSOCKOPT               p_getsockopt;
    LPFN_GETSOCKNAME              p_getsockname;
@@ -415,6 +423,16 @@ typedef struct tagNETXSOCK {
 #endif /* #if defined(_WIN32) */
 
 } NETXSOCK, *PNETXSOCK;
+
+
+typedef struct tagNETXSRV {
+   char        ip_address[64];
+   int         port;
+   int         timeout; /* v1.3.13 */
+   char        trace_dev[128];
+   short       trace;
+   FILE        *pftrace;
+} NETXSRV;
 
 
 typedef struct tagNETXCON {
@@ -439,7 +457,7 @@ typedef struct tagNETXCON {
    unsigned char *recv_buf;
    short          trace;
    FILE *         pftrace;
-} NETXCON, *pcon;
+} NETXCON;
 
 
 #if NETX_NODE_VERSION >= 120000
@@ -449,6 +467,15 @@ typedef struct tagNETXCON {
 #define NETX_TO_STRING(a)            a->ToString(icontext).ToLocalChecked()
 #define NETX_NUMBER_VALUE(a)         a->NumberValue(icontext).ToChecked()
 #define NETX_INT32_VALUE(a)          a->Int32Value(icontext).FromJust()
+
+#define NDC_INTEGER_NEW(a)          Integer::New(isolate, a)
+#define NDC_OBJECT_NEW()            Object::New(isolate)
+#define NDC_ARRAY_NEW(a)            Array::New(isolate, a)
+#define NDC_ARRAY_NEW(a)            Array::New(isolate, a)
+#define NDC_NUMBER_NEW(a)           Number::New(isolate, a)
+#define NDC_BOOLEAN_NEW(a)          Boolean::New(isolate, a)
+#define NDC_NULL()                  Null(isolate)
+
 #elif NETX_NODE_VERSION >= 100000
 #define NETX_GET(a,b)                a->Get(icontext,b).ToLocalChecked()
 #define NETX_SET(a,b,c)              a->Set(icontext,b,c).FromJust()
@@ -496,7 +523,7 @@ int      netx_write                 (NETXCON *pcon);
 int      netx_http                  (NETXCON *pcon);
 int      netx_disconnect            (NETXCON *pcon);
 
-int      netx_init_vars             (NETXCON *pcon);
+int      netx_init_vars             (NETXCON *pcon, NETXSRV *psrv);
 int      netx_format_buffer         (char *obuffer, char *ibuffer, int len, int max);
 int      netx_ucase                 (char *string);
 int      netx_lcase                 (char *string);
@@ -551,12 +578,9 @@ private:
 
 public:
 
-   char        ip_address[64];
-   int         port;
+   NETXSRV     srv; /* v1.3.13 */
+   NETXSRV     *psrv;
    NETXCON     *pcon;
-   char        trace_dev[128];
-   short       trace;
-   FILE        *pftrace;
 
    static Persistent<Function> s_ct;
 
@@ -572,6 +596,7 @@ public:
       t->InstanceTemplate()->SetInternalFieldCount(1);
 
       NODE_SET_PROTOTYPE_METHOD(t, "version", version);
+      NODE_SET_PROTOTYPE_METHOD(t, "timeout", timeout);
       NODE_SET_PROTOTYPE_METHOD(t, "settrace", settrace);
       NODE_SET_PROTOTYPE_METHOD(t, "connect", connect);
       NODE_SET_PROTOTYPE_METHOD(t, "read", read);
@@ -621,6 +646,8 @@ public:
       server *s = new server();
       s->Wrap(args.This());
 
+      s->psrv = &(s->srv); /* v1.3.13 */
+
       narg = args.Length();
       if (narg < 2) {
          isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
@@ -628,12 +655,13 @@ public:
       }
 
       Local<String> ip = NETX_TO_STRING(args[0]);
-      netx_write_char8(isolate, ip, s->ip_address, 1);
-      s->port = (int) NETX_INT32_VALUE(args[1]);
+      netx_write_char8(isolate, ip, s->psrv->ip_address, 1);
+      s->psrv->port = (int) NETX_INT32_VALUE(args[1]);
       s->pcon = NULL;
-      s->pftrace = NULL;
-      s->trace = 0;
-      s->trace_dev[0] = '\0';
+      s->psrv->timeout = NETX_TIMEOUT; /* v1.3.13 */
+      s->psrv->pftrace = NULL;
+      s->psrv->trace = 0;
+      s->psrv->trace_dev[0] = '\0';
 
       args.GetReturnValue().Set(args.This());
 
@@ -928,7 +956,41 @@ public:
    }
 
 
-static void settrace(const FunctionCallbackInfo<Value>& args)
+   static void timeout(const FunctionCallbackInfo<Value>& args)
+   {
+      Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 100000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
+      HandleScope scope(isolate);
+      int narg, timeout;
+
+      server * s = ObjectWrap::Unwrap<server>(args.This());
+      s->s_count ++;
+
+      narg = args.Length();
+      if (narg > 1) {
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "The timeout method takes a maximum of one argument", 1)));
+         return;
+      }
+      if (narg > 0 && args[0]->IsInt32()) {
+         timeout = NETX_INT32_VALUE(args[0]);
+         if (timeout >= 0) {
+            s->psrv->timeout = timeout;
+            if (s->pcon) {
+               s->pcon->timeout = s->psrv->timeout;
+            }
+         }
+      }
+
+      Local<Integer> result = Int32::New(isolate, s->psrv->timeout);
+      args.GetReturnValue().Set(result);
+
+      return;
+   }
+
+
+   static void settrace(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
 #if NETX_NODE_VERSION >= 100000
@@ -951,40 +1013,40 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
       result = 0;
       if (buffer[0] == '0') {
-         if (s->pftrace) {
-            fprintf(s->pftrace, "\r\n");
-            fflush(s->pftrace);
-            fclose(s->pftrace);
+         if (s->psrv->pftrace) {
+            fprintf(s->psrv->pftrace, "\r\n");
+            fflush(s->psrv->pftrace);
+            fclose(s->psrv->pftrace);
          }
-         s->trace = 0;
-         s->pftrace = NULL;
-         s->trace_dev[0] = '\0';
+         s->psrv->trace = 0;
+         s->psrv->pftrace = NULL;
+         s->psrv->trace_dev[0] = '\0';
       }
       else {
          if (buffer[0] == '1' || !strcmp(buffer, "stdout")) {
-            s->trace = 1;
-            s->pftrace = stdout;
+            s->psrv->trace = 1;
+            s->psrv->pftrace = stdout;
          }
          else if (buffer[0] != '0') {
-            s->trace = 1;
-            s->pftrace = fopen(buffer, "a");
-            if (s->pftrace) {
-               fprintf(s->pftrace, "\r\n-> fopen(%s, \"a\") (Trace file opened)", buffer);
-               fflush(s->pftrace);
-               strcpy(s->trace_dev, buffer);
+            s->psrv->trace = 1;
+            s->psrv->pftrace = fopen(buffer, "a");
+            if (s->psrv->pftrace) {
+               fprintf(s->psrv->pftrace, "\r\n-> fopen(%s, \"a\") (Trace file opened)", buffer);
+               fflush(s->psrv->pftrace);
+               strcpy(s->psrv->trace_dev, buffer);
             }
             else {
                result = -1;
-               s->pftrace = stdout;
-               fprintf(s->pftrace, "\r\n-> fopen(%s, \"a\") (Cannot open trace file specified - using stdout instead)", buffer);
-               fflush(s->pftrace);
+               s->psrv->pftrace = stdout;
+               fprintf(s->psrv->pftrace, "\r\n-> fopen(%s, \"a\") (Cannot open trace file specified - using stdout instead)", buffer);
+               fflush(s->psrv->pftrace);
             }
          }
       }
 
       if (s->pcon) {
-         s->pcon->trace = s->trace;
-         s->pcon->pftrace = s->pftrace;
+         s->pcon->trace = s->psrv->trace;
+         s->pcon->pftrace = s->psrv->pftrace;
       }
 
       args.GetReturnValue().Set(Integer::New(isolate, result));
@@ -996,6 +1058,9 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
    static void connect(const FunctionCallbackInfo<Value>& args)
    {
       Isolate* isolate = args.GetIsolate();
+#if NETX_NODE_VERSION >= 100000
+      Local<Context> icontext = isolate->GetCurrentContext();
+#endif
       HandleScope scope(isolate);
       short async;
       int narg;
@@ -1012,8 +1077,8 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          }
          memset((void *) s->pcon, 0, sizeof(NETXCON));
 
-         s->pcon->trace = s->trace;
-         s->pcon->pftrace = s->pftrace;
+         s->pcon->trace = s->psrv->trace;
+         s->pcon->pftrace = s->psrv->pftrace;
 
          s->pcon->send_buf = (unsigned char *) netx_malloc(sizeof(char) * NETX_RECV_BUFFER, 0);
          if (!s->pcon->send_buf) {
@@ -1031,12 +1096,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          s->pcon->recv_buf_size = NETX_RECV_BUFFER - 1;
       }
 
-      s->pcon->timeout = NETX_TIMEOUT;
       s->pcon->method = NETX_METHOD_CONNECT;
+      s->pcon->timeout = s->psrv->timeout; /* v1.3.13 */
 
       narg = args.Length();
       if (narg < 0) {
-         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *)"Unable to process arguments", 1)));
+         isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Unable to process arguments", 1)));
          return;
       }
       if (narg > 0 && args[narg - 1]->IsFunction()) {
@@ -1047,8 +1112,25 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
          async = 0;
       }
 
-      strcpy(s->pcon->ip_address, s->ip_address);
-      s->pcon->port = s->port;
+      if (narg > 0 && args[0]->IsObject()) {
+
+         Local<Object> request;
+         Local<String> timeout_name = netx_new_string8(isolate, (char *) NETX_STR_TIMEOUT, 1);
+
+         request = NETX_TO_OBJECT(args[0]);
+
+         if (!NETX_GET(request, timeout_name)->IsUndefined()) {
+            if (NETX_GET(request, timeout_name)->IsInt32()) {
+               s->pcon->timeout = NETX_INT32_VALUE(NETX_GET(request, timeout_name)); /* v1.3.13 */
+               if (s->pcon->timeout < 0) {
+                  s->pcon->timeout = s->psrv->timeout;
+               }
+            }
+         }
+      }
+
+      strcpy(s->pcon->ip_address, s->psrv->ip_address);
+      s->pcon->port = s->psrv->port;
 
       if (async) {
 
@@ -1117,6 +1199,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       }
 
       s->pcon->method = NETX_METHOD_READ;
+      s->pcon->timeout = s->psrv->timeout; /* v1.3.13 */
 
       narg = args.Length();
       if (narg < 0) {
@@ -1136,7 +1219,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       Local<String> length_name = netx_new_string8(isolate, (char *) NETX_STR_LENGTH, 1);
       Local<String> timeout_name = netx_new_string8(isolate, (char *) NETX_STR_TIMEOUT, 1);
 
-      netx_init_vars(s->pcon);
+      netx_init_vars(s->pcon, s->psrv);
 
       if (narg && args[0]->IsObject()) {
          request = NETX_TO_OBJECT(args[0]);
@@ -1146,7 +1229,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
 
          }
          if (!NETX_GET(request, timeout_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, timeout_name));
+            if (NETX_GET(request, timeout_name)->IsInt32()) {
+               s->pcon->timeout = NETX_INT32_VALUE(NETX_GET(request, timeout_name)); /* v1.3.13 */
+               if (s->pcon->timeout < 0) {
+                  s->pcon->timeout = s->psrv->timeout;
+               }
+            }
          }
       }
 
@@ -1234,7 +1322,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       Local<String> content_name = netx_new_string8(isolate, (char *) NETX_STR_DATA, 1);
       Local<String> content_value;
 
-      netx_init_vars(s->pcon);
+      netx_init_vars(s->pcon, s->psrv);
 
       if (args[0]->IsObject()) {
          request = NETX_TO_OBJECT(args[0]);
@@ -1316,6 +1404,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       }
 
       s->pcon->method = NETX_METHOD_HTTP;
+      s->pcon->timeout = s->psrv->timeout; /* v1.3.13 */
 
       narg = args.Length();
       if (narg < 1) {
@@ -1341,7 +1430,7 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
       Local<String> length_name = netx_new_string8(isolate, (char *) NETX_STR_LENGTH, 1);
       Local<String> timeout_name = netx_new_string8(isolate, (char *) NETX_STR_TIMEOUT, 1);
 
-      netx_init_vars(s->pcon);
+      netx_init_vars(s->pcon, s->psrv);
 
       if (args[0]->IsObject()) {
          int hlen, clen;
@@ -1380,7 +1469,12 @@ static void settrace(const FunctionCallbackInfo<Value>& args)
             s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, length_name));
          }
          if (!NETX_GET(request, timeout_name)->IsUndefined()) {
-            s->pcon->length = NETX_INT32_VALUE(NETX_GET(request, timeout_name));
+            if (NETX_GET(request, timeout_name)->IsInt32()) {
+               s->pcon->timeout = NETX_INT32_VALUE(NETX_GET(request, timeout_name)); /* v1.3.13 */
+               if (s->pcon->timeout < 0) {
+                  s->pcon->timeout = s->psrv->timeout;
+               }
+            }
          }
       }
       else {
@@ -1958,9 +2052,9 @@ int netx_disconnect(NETXCON *pcon)
 }
 
 
-int netx_init_vars(NETXCON *pcon)
+int netx_init_vars(NETXCON *pcon, NETXSRV *psrv)
 {
-   pcon->timeout = NETX_TIMEOUT;
+   pcon->timeout = psrv->timeout; /* v1.3.13 */
    pcon->length = 0;
    pcon->eof = 0;
    pcon->hlen = 0;
@@ -2209,6 +2303,7 @@ int netx_load_winsock(NETXCON *pcon, int context)
    netx_so.p_inet_ntoa             = (LPFN_INET_NTOA)              netx_dso_sym(netx_so.plibrary, "inet_ntoa");
 
    netx_so.p_socket                = (LPFN_SOCKET)                 netx_dso_sym(netx_so.plibrary, "socket");
+   netx_so.p_ioctlsocket           = (LPFN_IOCTLSOCKET)            netx_dso_sym(netx_so.plibrary, "ioctlsocket");
    netx_so.p_setsockopt            = (LPFN_SETSOCKOPT)             netx_dso_sym(netx_so.plibrary, "setsockopt");
    netx_so.p_getsockopt            = (LPFN_GETSOCKOPT)             netx_dso_sym(netx_so.plibrary, "getsockopt");
    netx_so.p_getsockname           = (LPFN_GETSOCKNAME)            netx_dso_sym(netx_so.plibrary, "getsockname");
@@ -2812,18 +2907,15 @@ int netx_tcp_connect_ex(NETXCON *pcon, xLPSOCKADDR p_srv_addr, socklen_netx srv_
 {
 #if defined(_WIN32)
    int n;
+   unsigned long imode;
+   fd_set eset, wset;
+   struct timeval tval;
 #else
    int flags, n, error;
    socklen_netx len;
    fd_set rset, wset;
    struct timeval tval;
 #endif
-
-#if defined(SOLARIS) && BIT64PLAT
-   timeout = 0;
-#endif
-
-   /* It seems that BIT64PLAT is set to 0 for 64-bit Solaris:  So, to be safe .... */
 
 #if defined(SOLARIS)
    timeout = 0;
@@ -2833,15 +2925,70 @@ int netx_tcp_connect_ex(NETXCON *pcon, xLPSOCKADDR p_srv_addr, socklen_netx srv_
 
 #if defined(_WIN32)
 
+      /* v1.3.13 */
+      imode = 1;
+      n = NETX_IOCTLSOCKET(pcon->cli_socket, FIONBIO, &imode);
+      if (pcon->trace == 1) {
+         fprintf(pcon->pftrace, "\r\n      -> %d<=ioctlsocket(%d, FIONBIO, %d)", n, (int) pcon->cli_socket, (int) imode);
+         fflush(pcon->pftrace);
+      }
+      if (n == SOCKET_ERROR) {
+         NETX_CLOSESOCKET(pcon->cli_socket);
+         return (-1);
+      }
+
       n = NETX_CONNECT(pcon->cli_socket, (xLPSOCKADDR) p_srv_addr, (socklen_netx) srv_addr_len);
       if (pcon->trace == 1) {
          fprintf(pcon->pftrace, "\r\n      -> %d<=connect(%d, %p, %d)", n, (int) pcon->cli_socket, p_srv_addr, (int) srv_addr_len);
          fflush(pcon->pftrace);
       }
 
-      return n;
+      if (n == SOCKET_ERROR) {
+
+         if (NETX_WSAGETLASTERROR() != WSAEWOULDBLOCK) {
+            NETX_CLOSESOCKET(pcon->cli_socket);
+            return (-1);
+         }
+
+         FD_ZERO(&wset);
+         FD_ZERO(&eset);
+         FD_SET(pcon->cli_socket, &wset);
+         FD_SET(pcon->cli_socket, &eset);
+
+         tval.tv_sec = timeout;
+         tval.tv_usec = 0;
+
+         n = NETX_SELECT((int) (pcon->cli_socket + 1), NULL, &wset, &eset, &tval);
+         if (pcon->trace == 1) {
+            fprintf(pcon->pftrace, "\r\n      -> %d<=select(%d, %p, %p, %p, %p{tv_sec=%d; tv_usec=%d})", n, (int) pcon->cli_socket + 1, (void *) 0, &wset, &eset, &tval, (int) tval.tv_sec, (int) tval.tv_usec);
+            fflush(pcon->pftrace);
+         }
+
+         if (n == 0) { /* timeout */
+            NETX_CLOSESOCKET(pcon->cli_socket);
+            return (-2);
+         }
+         if (!NETX_FD_ISSET(pcon->cli_socket, &wset)) {
+            n = NETX_CLOSESOCKET(pcon->cli_socket);
+            return (-1);
+         }
+      }
+
+      imode = 0;
+      n = NETX_IOCTLSOCKET(pcon->cli_socket, FIONBIO, &imode);
+      if (pcon->trace == 1) {
+         fprintf(pcon->pftrace, "\r\n      -> %d<=ioctlsocket(%d, FIONBIO, %d)", n, (int) pcon->cli_socket, (int) imode);
+         fflush(pcon->pftrace);
+      }
+      if (n == SOCKET_ERROR) {
+         NETX_CLOSESOCKET(pcon->cli_socket);
+         return (-1);
+      }
+
+      return 0;
 
 #else
+
       flags = fcntl(pcon->cli_socket, F_GETFL, 0);
       n = fcntl(pcon->cli_socket, F_SETFL, flags | O_NONBLOCK);
       if (pcon->trace == 1) {
@@ -2881,7 +3028,7 @@ int netx_tcp_connect_ex(NETXCON *pcon, xLPSOCKADDR p_srv_addr, socklen_netx srv_
 
          wset = rset;
          tval.tv_sec = timeout;
-         tval.tv_usec = timeout;
+         tval.tv_usec = 0;
 
          n = NETX_SELECT((int) (pcon->cli_socket + 1), &rset, &wset, NULL, &tval);
 
@@ -2915,7 +3062,7 @@ int netx_tcp_connect_ex(NETXCON *pcon, xLPSOCKADDR p_srv_addr, socklen_netx srv_
          return (-1);
       }
 
-      return 1;
+      return 0;
 
 #endif
 
