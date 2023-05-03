@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2022 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2016-2023 M/Gateway Developments Ltd,                      |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -63,6 +63,9 @@ Version 1.3.13 14 December 2022:
    Allow a timeout to be specified for the connect() method.
    Introduce a timeout() method to allow the default timeout applied to all tcp-netx methods to be changed.
    - The initial default timeout for all methods is set to 10 seconds.
+
+Version 1.3.13a 3 May 2023:
+   Verify that tcp-netx.node will build and work with Node.js v20.x.x. (ABI: 115).
 
 */
 
