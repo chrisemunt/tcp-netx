@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2016-2023 M/Gateway Developments Ltd,                      |
+   | Copyright (c) 2019-2023 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -66,6 +66,9 @@ Version 1.3.13 14 December 2022:
 
 Version 1.3.13a 3 May 2023:
    Verify that tcp-netx.node will build and work with Node.js v20.x.x. (ABI: 115).
+
+ Version 1.3.13b 22 June 2023:
+    Documentation update.
 
 */
 
