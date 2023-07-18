@@ -70,6 +70,9 @@ Version 1.3.13a 3 May 2023:
  Version 1.3.13b 22 June 2023:
     Documentation update.
 
+ Version 1.4.14 18 July 2023:
+   Introduce support for Alpine Linux.
+
 */
 
 
@@ -152,8 +155,8 @@ DISABLE_WCAST_FUNCTION_TYPE
 #include <node_object_wrap.h>
 
 #define NETX_VERSION_MAJOR       1
-#define NETX_VERSION_MINOR       3
-#define NETX_VERSION_BUILD       13
+#define NETX_VERSION_MINOR       4
+#define NETX_VERSION_BUILD       14
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -546,6 +549,11 @@ int      netx_tcp_disconnect        (NETXCON *pcon, int context);
 int      netx_tcp_write             (NETXCON *pcon, unsigned char *data, int size);
 int      netx_tcp_read              (NETXCON *pcon, unsigned char *data, int size, int timeout, int context);
 int      netx_get_last_error        (int context);
+#if !defined(_WIN32)
+/* v1.4.14 */
+char*    netx_strerror_r            (int result, char *buffer, int buffer_size, int error_code);
+char*    netx_strerror_r            (char *result, char *buffer, int buffer_size, int error_code);
+#endif
 int      netx_get_error_message     (int error_code, char *message, int size, int context);
 int      netx_get_std_error_message (int error_code, char *message, int size, int context);
 int      netx_enter_critical_section(void *p_crit);
@@ -3297,6 +3305,36 @@ int netx_get_last_error(int context)
    return error_code;
 }
 
+/* v1.4.14 */
+#if !defined(_WIN32)
+
+/*
+   strerror_r: Reentrant version of `strerror'.
+   There are 2 flavours of `strerror_r', GNU which returns the string and may or may not use the supplied temporary buffer
+   and the POSIX one which fills the string into the buffer.
+   To use the POSIX version, -D_XOPEN_SOURCE=600 or -D_POSIX_C_SOURCE=200112L without -D_GNU_SOURCE is needed,
+   otherwise the GNU version is preferred.
+   For the benefit of Alpine Linux we'll use these overloaded functions.
+*/
+
+char * netx_strerror_r(int result, char *buffer, int buffer_size, int error_code)
+{
+   if (result) {
+      sprintf(buffer, "Unknown error: %d", error_code);
+   }
+   return buffer;
+}
+
+char * netx_strerror_r(char *result, char *buffer, int buffer_size, int error_code)
+{
+   if (result && result != buffer) {
+      strncpy(buffer, result, buffer_size - 1);
+      buffer[buffer_size - 1] = '\0';
+   }
+   return buffer;
+}
+#endif
+
 
 int netx_get_error_message(int error_code, char *message, int size, int context)
 {
@@ -3391,20 +3429,10 @@ int netx_get_error_message(int error_code, char *message, int size, int context)
 #else
 
    if (context == 0) {
-#if defined(_GNU_SOURCE)
-      char *p;
-#endif
       strcpy(message, "");
 #if defined(LINUX) || defined(AIX) || defined(OSF1) || defined(MACOSX)
-#if defined(_GNU_SOURCE)
-      p = strerror_r(error_code, message, (size_t) size);
-      if (p && p != message) {
-         strncpy(message, p, size - 1);
-         message[size - 1] = '\0';
-      }
-#else
-      strerror_r(error_code, message, (size_t) size);
-#endif
+      /* v1.4.14 */
+      netx_strerror_r(strerror_r(error_code, message, (size_t) size), message, size, error_code);
       size = (int) strlen(message);
 #else
       netx_get_std_error_message(error_code, message, size, context);
