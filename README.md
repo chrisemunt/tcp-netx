@@ -3,7 +3,7 @@
 Synchronous and Asynchronous access to TCP servers using basic TCP sockets or HTTP from Node.js.
 
 Chris Munt <cmunt@mgateway.com>  
-22 June 2023, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
+18 July 2023, MGateway Ltd [http://www.mgateway.com](http://www.mgateway.com)
 
 * Verified to work with Node.js v4 to v20.
 * [Release Notes](#relnotes) can be found at the end of this document.
@@ -381,10 +381,14 @@ Unless required by applicable law or agreed to in writing, software distributed 
 * Allow a timeout to be specified for the **connect()** method.
 * Introduce a **timeout()** method to allow the default timeout applied to all **tcp-netx** methods to be changed.  The initial default timeout for all methods is set to 10 seconds.
 
-### v1.2.13a (3 May 2023)
+### v1.3.13a (3 May 2023)
 
 * Verify that **tcp-netx** will build and work with Node.js v20.x.x.
 
-### v1.2.13b (22 June 2023)
+### v1.3.13b (22 June 2023)
 
 * Documentation update.
+
+### v1.4.14 (18 July 2023)
+
+* Introduce support for Alpine Linux.
