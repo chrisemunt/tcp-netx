@@ -112,7 +112,9 @@ Version 1.3.13a 3 May 2023:
 #include <errno.h>
 #include <unistd.h>
 #include <sys/time.h>
+#if defined(__APPLE__)
 #include <sys/errno.h>
+#endif
 #include <signal.h>
 #include <pwd.h>
 #include <sys/types.h>
