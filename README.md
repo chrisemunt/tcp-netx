@@ -38,7 +38,7 @@ Ubuntu:
        apt-get install g++
 
 Red Hat and CentOS:
-
+1. 
        yum install gcc-c++
 
 Apple OS X can use the freely available **Xcode** development environment.
