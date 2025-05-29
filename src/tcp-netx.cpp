@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2019-2023 MGateway Ltd                                     |
+   | Copyright (c) 2019-2025 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -67,11 +67,17 @@ Version 1.3.13 14 December 2022:
 Version 1.3.13a 3 May 2023:
    Verify that tcp-netx.node will build and work with Node.js v20.x.x. (ABI: 115).
 
- Version 1.3.13b 22 June 2023:
+Version 1.3.13b 22 June 2023:
     Documentation update.
 
- Version 1.4.14 18 July 2023:
+Version 1.4.14 18 July 2023:
    Introduce support for Alpine Linux.
+
+Version 1.4.14a 21 May 2024:
+   Verify that tcp-netx will build and work with Node.js v22.x.x. (ABI: 127).
+
+Version 1.4.15 29 May 2025:
+   Verify that tcp-netx will build and work with Node.js v24.x.x. (ABI: 137).
 
 */
 
@@ -148,17 +154,22 @@ Version 1.3.13a 3 May 2023:
 #endif
 
 DISABLE_WCAST_FUNCTION_TYPE
-
+/*
 #include <v8.h>
 #include <node.h>
 #include <node_version.h>
 
 #include <uv.h>
 #include <node_object_wrap.h>
+*/
+#include <node.h>
+#include <node_buffer.h>
+#include <uv.h>
+#include <node_object_wrap.h>
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       4
-#define NETX_VERSION_BUILD       14
+#define NETX_VERSION_BUILD       15
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -671,7 +682,7 @@ public:
       }
 
       Local<String> ip = NETX_TO_STRING(args[0]);
-      netx_write_char8(isolate, ip, s->psrv->ip_address, 1);
+      netx_write_char8(isolate, ip, s->psrv->ip_address, sizeof(s->psrv->ip_address), 1);
       s->psrv->port = (int) NETX_INT32_VALUE(args[1]);
       s->pcon = NULL;
       s->psrv->timeout = NETX_TIMEOUT; /* v1.3.13 */
@@ -741,7 +752,9 @@ public:
    static int netx_string8_length(Isolate * isolate, Local<String> str, int utf8)
    {
       if (utf8) {
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 240000
+         return str->Utf8LengthV2(isolate);
+#elif NETX_NODE_VERSION >= 120000
          return str->Utf8Length(isolate);
 #else
          return str->Utf8Length();
@@ -799,17 +812,22 @@ public:
    }
 
 
-   static int netx_write_char8(v8::Isolate * isolate, Local<String> str, char * buffer, int utf8)
+   static int netx_write_char8(v8::Isolate * isolate, Local<String> str, char * buffer, int buffer_size, int utf8)
    {
       if (utf8) {
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 240000
+         return str->WriteUtf8V2(isolate, buffer, buffer_size, v8::String::WriteFlags::kNullTerminate);
+#elif NETX_NODE_VERSION >= 120000
          return str->WriteUtf8(isolate, buffer);
 #else
          return str->WriteUtf8(buffer);
 #endif
       }
       else {
-#if NETX_NODE_VERSION >= 120000
+#if NETX_NODE_VERSION >= 240000
+         str->WriteOneByteV2(isolate, 0, str->Length(), (uint8_t *) buffer, v8::String::WriteFlags::kNullTerminate);
+         return 0;
+#elif NETX_NODE_VERSION >= 120000
          return str->WriteOneByte(isolate, (uint8_t *) buffer);
 #elif NETX_NODE_VERSION >= 1200
          return str->WriteOneByte((uint8_t *) buffer);
@@ -1014,7 +1032,7 @@ public:
 #endif
       HandleScope scope(isolate);
       int narg, result;
-      char buffer[245];
+      char buffer[256];
 
       server * s = ObjectWrap::Unwrap<server>(args.This());
       s->s_count ++;
@@ -1025,7 +1043,7 @@ public:
          return;
       }
 
-      netx_write_char8(isolate, NETX_TO_STRING(args[0]), buffer, 1);
+      netx_write_char8(isolate, NETX_TO_STRING(args[0]), buffer, sizeof(buffer), 1);
 
       result = 0;
       if (buffer[0] == '0') {
@@ -1352,7 +1370,7 @@ public:
                   return;
                }
             }
-            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf, s->binary ? 0 : 1);
+            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf, s->pcon->send_buf_size, s->binary ? 0 : 1);
          }
          else {
             isolate->ThrowException(Exception::TypeError(netx_new_string8(isolate, (char *) "Missing 'data' property", 1)));
@@ -1474,10 +1492,10 @@ public:
                return;
             }
          }
-         netx_write_char8(isolate, headers_value, (char *) s->pcon->send_buf, 1);
+         netx_write_char8(isolate, headers_value, (char *) s->pcon->send_buf, s->pcon->send_buf_size, 1);
 
          if (clen) {
-            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf + hlen, 1);
+            netx_write_char8(isolate, content_value, (char *) s->pcon->send_buf + hlen, s->pcon->send_buf_size - hlen, 1);
          }
          s->pcon->send_buf_len = hlen + clen;
 
@@ -2277,23 +2295,23 @@ int netx_load_winsock(NETXCON *pcon, int context)
       }
    }
 
-   netx_so.p_WSASocket             = (LPFN_WSASOCKET)              netx_dso_sym(netx_so.plibrary, "WSASocketA");
-   netx_so.p_WSAGetLastError       = (LPFN_WSAGETLASTERROR)        netx_dso_sym(netx_so.plibrary, "WSAGetLastError");
-   netx_so.p_WSAStartup            = (LPFN_WSASTARTUP)             netx_dso_sym(netx_so.plibrary, "WSAStartup");
-   netx_so.p_WSACleanup            = (LPFN_WSACLEANUP)             netx_dso_sym(netx_so.plibrary, "WSACleanup");
-   netx_so.p_WSAFDIsSet            = (LPFN_WSAFDISSET)             netx_dso_sym(netx_so.plibrary, "__WSAFDIsSet");
-   netx_so.p_WSARecv               = (LPFN_WSARECV)                netx_dso_sym(netx_so.plibrary, "WSARecv");
-   netx_so.p_WSASend               = (LPFN_WSASEND)                netx_dso_sym(netx_so.plibrary, "WSASend");
+   netx_so.p_WSASocket             = (LPFN_WSASOCKET)              netx_dso_sym(netx_so.plibrary, (char *) "WSASocketA");
+   netx_so.p_WSAGetLastError       = (LPFN_WSAGETLASTERROR)        netx_dso_sym(netx_so.plibrary, (char *) "WSAGetLastError");
+   netx_so.p_WSAStartup            = (LPFN_WSASTARTUP)             netx_dso_sym(netx_so.plibrary, (char *) "WSAStartup");
+   netx_so.p_WSACleanup            = (LPFN_WSACLEANUP)             netx_dso_sym(netx_so.plibrary, (char *) "WSACleanup");
+   netx_so.p_WSAFDIsSet            = (LPFN_WSAFDISSET)             netx_dso_sym(netx_so.plibrary, (char *) "__WSAFDIsSet");
+   netx_so.p_WSARecv               = (LPFN_WSARECV)                netx_dso_sym(netx_so.plibrary, (char *) "WSARecv");
+   netx_so.p_WSASend               = (LPFN_WSASEND)                netx_dso_sym(netx_so.plibrary, (char *) "WSASend");
 
 #if defined(NETX_IPV6)
-   netx_so.p_WSAStringToAddress    = (LPFN_WSASTRINGTOADDRESS)     netx_dso_sym(netx_so.plibrary, "WSAStringToAddressA");
-   netx_so.p_WSAAddressToString    = (LPFN_WSAADDRESSTOSTRING)     netx_dso_sym(netx_so.plibrary, "WSAAddressToStringA");
-   netx_so.p_getaddrinfo           = (LPFN_GETADDRINFO)            netx_dso_sym(netx_so.plibrary, "getaddrinfo");
-   netx_so.p_freeaddrinfo          = (LPFN_FREEADDRINFO)           netx_dso_sym(netx_so.plibrary, "freeaddrinfo");
-   netx_so.p_getnameinfo           = (LPFN_GETNAMEINFO)            netx_dso_sym(netx_so.plibrary, "getnameinfo");
-   netx_so.p_getpeername           = (LPFN_GETPEERNAME)            netx_dso_sym(netx_so.plibrary, "getpeername");
-   netx_so.p_inet_ntop             = (LPFN_INET_NTOP)              netx_dso_sym(netx_so.plibrary, "InetNtop");
-   netx_so.p_inet_pton             = (LPFN_INET_PTON)              netx_dso_sym(netx_so.plibrary, "InetPton");
+   netx_so.p_WSAStringToAddress    = (LPFN_WSASTRINGTOADDRESS)     netx_dso_sym(netx_so.plibrary, (char *) "WSAStringToAddressA");
+   netx_so.p_WSAAddressToString    = (LPFN_WSAADDRESSTOSTRING)     netx_dso_sym(netx_so.plibrary, (char *) "WSAAddressToStringA");
+   netx_so.p_getaddrinfo           = (LPFN_GETADDRINFO)            netx_dso_sym(netx_so.plibrary, (char *) "getaddrinfo");
+   netx_so.p_freeaddrinfo          = (LPFN_FREEADDRINFO)           netx_dso_sym(netx_so.plibrary, (char *) "freeaddrinfo");
+   netx_so.p_getnameinfo           = (LPFN_GETNAMEINFO)            netx_dso_sym(netx_so.plibrary, (char *) "getnameinfo");
+   netx_so.p_getpeername           = (LPFN_GETPEERNAME)            netx_dso_sym(netx_so.plibrary, (char *) "getpeername");
+   netx_so.p_inet_ntop             = (LPFN_INET_NTOP)              netx_dso_sym(netx_so.plibrary, (char *) "InetNtop");
+   netx_so.p_inet_pton             = (LPFN_INET_PTON)              netx_dso_sym(netx_so.plibrary, (char *) "InetPton");
 #else
    netx_so.p_WSAStringToAddress    = NULL;
    netx_so.p_WSAAddressToString    = NULL;
@@ -2305,32 +2323,32 @@ int netx_load_winsock(NETXCON *pcon, int context)
    netx_so.p_inet_pton             = NULL;
 #endif
 
-   netx_so.p_closesocket           = (LPFN_CLOSESOCKET)            netx_dso_sym(netx_so.plibrary, "closesocket");
-   netx_so.p_gethostname           = (LPFN_GETHOSTNAME)            netx_dso_sym(netx_so.plibrary, "gethostname");
-   netx_so.p_gethostbyname         = (LPFN_GETHOSTBYNAME)          netx_dso_sym(netx_so.plibrary, "gethostbyname");
-   netx_so.p_getservbyname         = (LPFN_GETSERVBYNAME)          netx_dso_sym(netx_so.plibrary, "getservbyname");
-   netx_so.p_gethostbyaddr         = (LPFN_GETHOSTBYADDR)          netx_dso_sym(netx_so.plibrary, "gethostbyaddr");
-   netx_so.p_htons                 = (LPFN_HTONS)                  netx_dso_sym(netx_so.plibrary, "htons");
-   netx_so.p_htonl                 = (LPFN_HTONL)                  netx_dso_sym(netx_so.plibrary, "htonl");
-   netx_so.p_ntohl                 = (LPFN_NTOHL)                  netx_dso_sym(netx_so.plibrary, "ntohl");
-   netx_so.p_ntohs                 = (LPFN_NTOHS)                  netx_dso_sym(netx_so.plibrary, "ntohs");
-   netx_so.p_connect               = (LPFN_CONNECT)                netx_dso_sym(netx_so.plibrary, "connect");
-   netx_so.p_inet_addr             = (LPFN_INET_ADDR)              netx_dso_sym(netx_so.plibrary, "inet_addr");
-   netx_so.p_inet_ntoa             = (LPFN_INET_NTOA)              netx_dso_sym(netx_so.plibrary, "inet_ntoa");
+   netx_so.p_closesocket           = (LPFN_CLOSESOCKET)            netx_dso_sym(netx_so.plibrary, (char *) "closesocket");
+   netx_so.p_gethostname           = (LPFN_GETHOSTNAME)            netx_dso_sym(netx_so.plibrary, (char *) "gethostname");
+   netx_so.p_gethostbyname         = (LPFN_GETHOSTBYNAME)          netx_dso_sym(netx_so.plibrary, (char *) "gethostbyname");
+   netx_so.p_getservbyname         = (LPFN_GETSERVBYNAME)          netx_dso_sym(netx_so.plibrary, (char *) "getservbyname");
+   netx_so.p_gethostbyaddr         = (LPFN_GETHOSTBYADDR)          netx_dso_sym(netx_so.plibrary, (char *) "gethostbyaddr");
+   netx_so.p_htons                 = (LPFN_HTONS)                  netx_dso_sym(netx_so.plibrary, (char *) "htons");
+   netx_so.p_htonl                 = (LPFN_HTONL)                  netx_dso_sym(netx_so.plibrary, (char *) "htonl");
+   netx_so.p_ntohl                 = (LPFN_NTOHL)                  netx_dso_sym(netx_so.plibrary, (char *) "ntohl");
+   netx_so.p_ntohs                 = (LPFN_NTOHS)                  netx_dso_sym(netx_so.plibrary, (char *) "ntohs");
+   netx_so.p_connect               = (LPFN_CONNECT)                netx_dso_sym(netx_so.plibrary, (char *) "connect");
+   netx_so.p_inet_addr             = (LPFN_INET_ADDR)              netx_dso_sym(netx_so.plibrary, (char *) "inet_addr");
+   netx_so.p_inet_ntoa             = (LPFN_INET_NTOA)              netx_dso_sym(netx_so.plibrary, (char *) "inet_ntoa");
 
-   netx_so.p_socket                = (LPFN_SOCKET)                 netx_dso_sym(netx_so.plibrary, "socket");
-   netx_so.p_ioctlsocket           = (LPFN_IOCTLSOCKET)            netx_dso_sym(netx_so.plibrary, "ioctlsocket");
-   netx_so.p_setsockopt            = (LPFN_SETSOCKOPT)             netx_dso_sym(netx_so.plibrary, "setsockopt");
-   netx_so.p_getsockopt            = (LPFN_GETSOCKOPT)             netx_dso_sym(netx_so.plibrary, "getsockopt");
-   netx_so.p_getsockname           = (LPFN_GETSOCKNAME)            netx_dso_sym(netx_so.plibrary, "getsockname");
+   netx_so.p_socket                = (LPFN_SOCKET)                 netx_dso_sym(netx_so.plibrary, (char *) "socket");
+   netx_so.p_ioctlsocket           = (LPFN_IOCTLSOCKET)            netx_dso_sym(netx_so.plibrary, (char *) "ioctlsocket");
+   netx_so.p_setsockopt            = (LPFN_SETSOCKOPT)             netx_dso_sym(netx_so.plibrary, (char *) "setsockopt");
+   netx_so.p_getsockopt            = (LPFN_GETSOCKOPT)             netx_dso_sym(netx_so.plibrary, (char *) "getsockopt");
+   netx_so.p_getsockname           = (LPFN_GETSOCKNAME)            netx_dso_sym(netx_so.plibrary, (char *) "getsockname");
 
-   netx_so.p_select                = (LPFN_SELECT)                 netx_dso_sym(netx_so.plibrary, "select");
-   netx_so.p_recv                  = (LPFN_RECV)                   netx_dso_sym(netx_so.plibrary, "recv");
-   netx_so.p_send                  = (LPFN_SEND)                   netx_dso_sym(netx_so.plibrary, "send");
-   netx_so.p_shutdown              = (LPFN_SHUTDOWN)               netx_dso_sym(netx_so.plibrary, "shutdown");
-   netx_so.p_bind                  = (LPFN_BIND)                   netx_dso_sym(netx_so.plibrary, "bind");
-   netx_so.p_listen                = (LPFN_LISTEN)                 netx_dso_sym(netx_so.plibrary, "listen");
-   netx_so.p_accept                = (LPFN_ACCEPT)                 netx_dso_sym(netx_so.plibrary, "accept");
+   netx_so.p_select                = (LPFN_SELECT)                 netx_dso_sym(netx_so.plibrary, (char *) "select");
+   netx_so.p_recv                  = (LPFN_RECV)                   netx_dso_sym(netx_so.plibrary, (char *) "recv");
+   netx_so.p_send                  = (LPFN_SEND)                   netx_dso_sym(netx_so.plibrary, (char *) "send");
+   netx_so.p_shutdown              = (LPFN_SHUTDOWN)               netx_dso_sym(netx_so.plibrary, (char *) "shutdown");
+   netx_so.p_bind                  = (LPFN_BIND)                   netx_dso_sym(netx_so.plibrary, (char *) "bind");
+   netx_so.p_listen                = (LPFN_LISTEN)                 netx_dso_sym(netx_so.plibrary, (char *) "listen");
+   netx_so.p_accept                = (LPFN_ACCEPT)                 netx_dso_sym(netx_so.plibrary, (char *) "accept");
 
    if (   (netx_so.p_WSASocket              == NULL && netx_so.winsock == 2)
        ||  netx_so.p_WSAGetLastError        == NULL
