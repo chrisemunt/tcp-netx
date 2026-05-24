@@ -3,7 +3,7 @@
    | tcp-netx.node                                                            |
    | Author: Chris Munt cmunt@mgateway.com                                    |
    |                    chris.e.munt@gmail.com                                |
-   | Copyright (c) 2019-2025 MGateway Ltd                                     |
+   | Copyright (c) 2019-2026 MGateway Ltd                                     |
    | Surrey UK.                                                               |
    | All rights reserved.                                                     |
    |                                                                          |
@@ -78,6 +78,9 @@ Version 1.4.14a 21 May 2024:
 
 Version 1.4.15 29 May 2025:
    Verify that tcp-netx will build and work with Node.js v24.x.x. (ABI: 137).
+
+Version 1.4.16 24 May 2026:
+   Verify that tcp-netx will build and work with Node.js v26.x.x. (ABI: 147).
 
 */
 
@@ -169,7 +172,7 @@ DISABLE_WCAST_FUNCTION_TYPE
 
 #define NETX_VERSION_MAJOR       1
 #define NETX_VERSION_MINOR       4
-#define NETX_VERSION_BUILD       15
+#define NETX_VERSION_BUILD       16
 
 #define NETX_VERSION             NETX_VERSION_MAJOR "." NETX_VERSION_MINOR "." NETX_VERSION_BUILD
 #define NETX_NODE_VERSION        (NODE_MAJOR_VERSION * 10000) + (NODE_MINOR_VERSION * 100) + NODE_PATCH_VERSION
@@ -1685,7 +1688,12 @@ extern "C" NODE_MODULE_EXPORT void
 NODE_MODULE_INITIALIZER(Local<Object> exports,
                         Local<Value> module,
                         Local<Context> context) {
+/* v1.4.16 */
+#if NETX_NODE_VERSION >= 250000
+   Isolate* isolate = Isolate::GetCurrent();
+#else
    Isolate* isolate = context->GetIsolate();
+#endif
 
    /* Create a new instance of netx_addon_data for this instance of the addon. */
    netx_addon_data * data = new netx_addon_data(isolate, exports);
